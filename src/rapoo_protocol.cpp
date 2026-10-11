@@ -19,6 +19,15 @@ DWORD BuildUnlockPacket(BYTE* outBuf, DWORD bufSize) {
     return 33;
 }
 
+DWORD BuildRequestStatusPacket(BYTE* outBuf, DWORD bufSize) {
+    if (!outBuf || bufSize < 33) return 0;
+    std::memset(outBuf, 0, bufSize);
+    outBuf[0] = REPORT_ID_CONTROL; // 0x06
+    outBuf[1] = 0xA7;              // read_work_mode (triggers immediate 0x07 status report on VT_nrf54L)
+    outBuf[2] = 0x00;
+    return 33;
+}
+
 DWORD BuildWriteCommand(BYTE bank, BYTE addr, const BYTE* pData, BYTE dataLen, BYTE* outBuf, DWORD bufSize) {
     if (!outBuf || bufSize < 33) return 0;
     std::memset(outBuf, 0, bufSize);
@@ -55,24 +64,45 @@ DWORD BuildReadCommand(BYTE bank, BYTE addr, BYTE readLen, BYTE* outBuf, DWORD b
 bool ParseStatusReport(const BYTE* buf, DWORD bytesRead, DeviceStatus& outStatus, int cachedBattery) {
     if (!buf || bytesRead < 9) return false;
     if (buf[0] != REPORT_ID_STATUS) return false;
-    // Device marker: 0x20 (2.4G dongle), 0x10 (wired USB direct).
-    // High nibble contains device mode; lower nibble carries dynamic status bits.
-    BYTE modeNibble = buf[1] & 0xF0;
-    if (modeNibble != 0x20 && modeNibble != 0x10) return false;
-    outStatus.isWired = (modeNibble == 0x10);
 
-    outStatus.dpiLevel = (int)buf[2] + 1;
-    outStatus.dpiX = (int)buf[3] | ((int)buf[4] << 8);
-    outStatus.dpiY = (int)buf[5] | ((int)buf[6] << 8);
+    // Ignore pairing/disconnect control events (0xB1, 0xB2, 0xB3)
+    if (buf[1] == 0xB1 || buf[1] == 0xB2 || buf[1] == 0xB3) return false;
 
-    BYTE statusByte = buf[7];
-    BYTE rawBat = buf[8];
-    BYTE extraByte = (bytesRead > 9) ? buf[9] : 0;
+    // Cybercafe protocol devices prefix 0xB0 (userParams) before the 18-byte payload
+    const BYTE* p = (buf[1] == 0xB0) ? (buf + 2) : (buf + 1);
+    DWORD pLen = bytesRead - (DWORD)(p - buf);
+    if (pLen < 8) return false;
 
-    // Charging flag detection based on Rapoo status flags
-    bool charging = ((statusByte & 0x02) != 0 || statusByte == 0x02 || statusByte == 0x03 ||
-                     extraByte == 0x01 || extraByte == 0x02);
+    // In official Rapoo SDK (Nf):
+    // p[0] low nibble = conProtocol (0 = active, 2 = disconnected/mode switch)
+    // p[0] high nibble = sensor ID (1..15, e.g. 0x10, 0x20, 0x30, 0x40 on PAW3955U/VT3 PRO V2)
+    BYTE conProtocol = p[0] & 0x0F;
+    BYTE sensorId = (p[0] >> 4) & 0x0F;
+    if (sensorId == 0) return false;
+
+    outStatus.isWired = false;
+    outStatus.rfConnected = (conProtocol != 2);
+
+    outStatus.dpiLevel = (int)p[1] + 1;
+    outStatus.dpiX = (int)p[2] | ((int)p[3] << 8);
+    outStatus.dpiY = (int)p[4] | ((int)p[5] << 8);
+
+    BYTE statusByte = p[6]; // batStatus: 1 = discharging, 2/3 = charging
+    BYTE rawBat = p[7];     // batPercent: 0..100
+
+    // Charging flag detection based on Rapoo batStatus (p[6]): 2 or 3 means charging
+    bool charging = (statusByte == 0x02 || statusByte == 0x03 || (statusByte & 0x02) != 0);
     outStatus.isCharging = charging;
+
+    if (pLen >= 11 && p[10] != 0) {
+        outStatus.pollingHz = CodeToPollingHz(p[10]);
+    } else {
+        outStatus.pollingHz = 0;
+    }
+
+    if (pLen >= 18 && p[17] != 0) {
+        outStatus.rfConnected = (((p[17] >> 7) & 1) != 0) && (conProtocol != 2);
+    }
 
     // Battery percentage filtering:
     // In Rapoo hardware, rawBat is an integer 0..100.

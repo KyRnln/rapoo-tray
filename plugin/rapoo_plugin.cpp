@@ -34,21 +34,33 @@ struct RapooDeviceDef {
 };
 
 static const RapooDeviceDef SUPPORTED_DEVICES[] = {
-    // 雷柏 VT7 系列 (实测已验证)
-    { L"pid_1460", L"雷柏 VT7", L"2.4G无线模式" },
-    { L"pid_4660", L"雷柏 VT7", L"USB有线模式" },
+    // 雷柏 VT7 系列
+    { L"pid_1460", L"雷柏 VT7 V2", L"2.4G无线模式" },
+    { L"pid_4660", L"雷柏 VT7 V2", L"USB有线模式" },
+    { L"pid_14a7", L"雷柏 VT7 PRO V2", L"2.4G无线模式" },
+    { L"pid_46a7", L"雷柏 VT7 PRO V2", L"USB有线模式" },
+    { L"pid_1416", L"雷柏 VT7 MAX", L"2.4G无线模式" },
+    { L"pid_4616", L"雷柏 VT7 MAX", L"USB有线模式" },
+    { L"pid_1413", L"雷柏 VT7", L"2.4G无线模式" },
+    { L"pid_4613", L"雷柏 VT7", L"USB有线模式" },
 
-    // 雷柏 VT3S 系列 (实测已验证)
+    // 雷柏 VT3S 系列
     { L"pid_1406", L"雷柏 VT3S", L"2.4G无线模式" },
     { L"pid_4606", L"雷柏 VT3S", L"USB有线模式" },
-    { L"pid_1410", L"雷柏 VT3S", L"2.4G无线模式" },
-    { L"pid_1411", L"雷柏 VT3S", L"USB有线模式" },
+    { L"pid_1410", L"雷柏 VT0", L"2.4G无线模式" },
+    { L"pid_4610", L"雷柏 VT0", L"USB有线模式" },
+    { L"pid_1411", L"雷柏 VT3S", L"2.4G无线模式" },
+    { L"pid_4611", L"雷柏 VT3S", L"USB有线模式" },
+    { L"pid_14a6", L"雷柏 VT3S PRO V2", L"2.4G无线模式" },
+    { L"pid_46a6", L"雷柏 VT3S PRO V2", L"USB有线模式" },
 
-    // 雷柏 VT3 系列 (实测已验证)
+    // 雷柏 VT3 系列
+    { L"pid_14a5", L"雷柏 VT3 PRO V2", L"2.4G无线模式" },
+    { L"pid_46a5", L"雷柏 VT3 PRO V2", L"USB有线模式" },
+    { L"pid_1462", L"雷柏 VT3 V2", L"2.4G无线模式" },
+    { L"pid_4662", L"雷柏 VT3 V2", L"USB有线模式" },
     { L"pid_1412", L"雷柏 VT3", L"2.4G无线模式" },
     { L"pid_4612", L"雷柏 VT3", L"USB有线模式" },
-
-    // 雷柏 VT3 MAX 系列 (实测已验证)
     { L"pid_1417", L"雷柏 VT3 MAX", L"2.4G无线模式" },
     { L"pid_4617", L"雷柏 VT3 MAX", L"USB有线模式" },
 };
@@ -339,36 +351,38 @@ static DWORD WINAPI HidWorkerThread(LPVOID lpParam) {
                 }
             }
 
-            BYTE modeNibble = buf[1] & 0xF0;
-            if (bytesRead >= 9 && buf[0] == 0x07 && (modeNibble == 0x20 || modeNibble == 0x10)) {
-                int level = (int)buf[2] + 1;
-                int dpi   = (int)buf[3] | ((int)buf[4] << 8);
-                BYTE statusByte = buf[7];
-                BYTE rawBat     = buf[8];
-                BYTE extraByte  = (bytesRead > 9) ? buf[9] : 0;
+            if (bytesRead >= 9 && buf[0] == 0x07 && buf[1] != 0xB1 && buf[1] != 0xB2 && buf[1] != 0xB3) {
+                const BYTE* p = (buf[1] == 0xB0) ? (buf + 2) : (buf + 1);
+                DWORD pLen = bytesRead - (DWORD)(p - buf);
+                BYTE sensorId = (p[0] >> 4) & 0x0F;
+                if (pLen >= 8 && sensorId != 0) {
+                    int level = (int)p[1] + 1;
+                    int dpi   = (int)p[2] | ((int)p[3] << 8);
+                    BYTE statusByte = p[6];
+                    BYTE rawBat     = p[7];
 
-                bool effWired = isWired || (modeNibble == 0x10);
-                bool charging = effWired || ((statusByte & 0x02) != 0 || statusByte == 0x02 || statusByte == 0x03 ||
-                                 extraByte == 0x01 || extraByte == 0x02);
+                    bool effWired = isWired;
+                    bool charging = effWired || (statusByte == 0x02 || statusByte == 0x03 || (statusByte & 0x02) != 0);
 
-                int bat = rawBat;
-                if (rawBat <= 1) {
-                    int cached = g_battery.load();
-                    if (cached >= 2 && cached <= 100) {
-                        bat = cached;
-                    } else {
-                        bat = (rawBat == 0) ? 100 : rawBat;
+                    int bat = rawBat;
+                    if (rawBat <= 1) {
+                        int cached = g_battery.load();
+                        if (cached >= 2 && cached <= 100) {
+                            bat = cached;
+                        } else {
+                            bat = (rawBat == 0) ? 100 : rawBat;
+                        }
+                    } else if (rawBat > 100) {
+                        bat = 100;
                     }
-                } else if (rawBat > 100) {
-                    bat = 100;
-                }
 
-                g_battery.store(bat);
-                g_isCharging.store(charging);
-                g_dpi.store(dpi);
-                g_dpiLevel.store(level);
-                g_connected.store(true);
-                StringCchCopyW(g_curModeName, ARRAYSIZE(g_curModeName), effWired ? L"USB有线模式" : L"2.4G无线模式");
+                    g_battery.store(bat);
+                    g_isCharging.store(charging);
+                    g_dpi.store(dpi);
+                    g_dpiLevel.store(level);
+                    g_connected.store(true);
+                    StringCchCopyW(g_curModeName, ARRAYSIZE(g_curModeName), effWired ? L"USB有线模式" : L"2.4G无线模式");
+                }
             }
         }
 
@@ -503,8 +517,8 @@ public:
         case TMI_DESCRIPTION: return L"在任务栏与悬浮窗实时显示雷柏鼠标电量与DPI";
         case TMI_AUTHOR:      return L"Iris";
         case TMI_COPYRIGHT:   return L"Copyright (C) 2026 Iris";
-        case TMI_VERSION:     return L"1.3.1";
-        case TMI_URL:         return L"https://github.com/Iris-0109/rapoo-tray";
+        case TMI_VERSION:     return L"1.4.0";
+        case TMI_URL:         return L"https://github.com/KyRnln/rapoo-tray";
         default:              return L"";
         }
     }

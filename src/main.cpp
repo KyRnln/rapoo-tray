@@ -7,9 +7,10 @@ extern "C" {
 #include <strsafe.h>
 #include "rapoo_protocol.h"
 #include "device_manager.h"
-#include "osd_window.h"
 #include "alert_window.h"
 #include "tray_menu.h"
+#include "flyout_window.h"
+#include "settings_window.h"
 
 static const UINT WM_APP_TRAYMSG = WM_APP + 1;
 static const UINT WM_APP_STATE_UPDATE = WM_APP + 2;
@@ -47,6 +48,8 @@ static void RefreshTrayUI(const Device::State& state) {
         g_hCurrentTrayIcon = hNewIcon;
     }
 
+    Flyout::Invalidate();
+    Settings::Invalidate();
     Alert::CheckBattery(state);
 }
 
@@ -55,24 +58,16 @@ static void OnDeviceStateChanged(const Device::State& state, DWORD changeMask) {
 
     static bool s_prevConnected = false;
     static bool s_prevWired = false;
+    WPARAM shouldPopupFlyout = 0;
 
     if (state.isConnected) {
         bool justConnected = !s_prevConnected;
         bool modeChanged = s_prevConnected && (s_prevWired != state.isWired);
         bool dpiChanged = (changeMask & Device::CHANGE_DPI) != 0;
 
-        // Auto popup OSD when device is recognized, when mode switches, or on DPI changes
+        // Slide in the Windows 11 notification flyout on startup recognition, mode switch, or DPI change
         if (justConnected || modeChanged || dpiChanged) {
-            Osd::ShowDpiUpdate(
-                state.dpiLevel,
-                state.dpiX,
-                state.dpiY,
-                state.battery,
-                state.pollingHz,
-                state.isCharging,
-                state.isWired,
-                state.modelName
-            );
+            shouldPopupFlyout = 1;
         }
 
         s_prevConnected = true;
@@ -82,7 +77,7 @@ static void OnDeviceStateChanged(const Device::State& state, DWORD changeMask) {
         s_prevWired = false;
     }
 
-    PostMessageW(g_hMainWnd, WM_APP_STATE_UPDATE, 0, 0);
+    PostMessageW(g_hMainWnd, WM_APP_STATE_UPDATE, shouldPopupFlyout, 0);
 }
 
 static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -95,41 +90,25 @@ static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
     switch (msg) {
         case WM_APP_TRAYMSG: {
             if (lParam == WM_LBUTTONUP) {
-                // Immediately refresh data from hardware and show fresh OSD
-                Device::ForceRefresh();
-                Device::State st = Device::GetCurrentState();
-                if (st.isConnected) {
-                    Osd::ShowDpiUpdate(
-                        st.dpiLevel,
-                        st.dpiX,
-                        st.dpiY,
-                        st.battery,
-                        st.pollingHz,
-                        st.isCharging,
-                        st.isWired,
-                        st.modelName
-                    );
-                } else {
-                    const WCHAR* mName = st.modelName[0] ? st.modelName : L"通用";
-                    Osd::Show(mName, L"设备休眠 / 未连接", L"请移动鼠标唤醒或插上 USB 线");
-                }
-                RefreshTrayUI(st);
+                // Slide in Windows native style Notification Card from Right to Left
+                Flyout::Toggle(hWnd);
+                RefreshTrayUI(Device::GetCurrentState());
             } else if (lParam == WM_RBUTTONUP) {
                 SetForegroundWindow(hWnd);
                 Tray::ShowMenu(hWnd);
-            } else if (lParam == WM_LBUTTONDBLCLK) {
-                int s = Tray::CycleBatteryStyle();
-                Osd::ShowStyleOsd(s);
-                RefreshTrayUI(Device::GetCurrentState());
             }
             return 0;
         }
 
         case WM_APP_STATE_UPDATE: {
             RefreshTrayUI(Device::GetCurrentState());
+            if (wParam == 1) {
+                Flyout::Show(hWnd);
+            }
             return 0;
         }
 
+        case WM_DWMCOLORIZATIONCOLORCHANGED:
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED: {
             RefreshTrayUI(Device::GetCurrentState());
@@ -166,6 +145,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         return 0;
     }
 
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     Tray::InitTheme();
 
     // Enable modern Per-Monitor V2 DPI awareness
@@ -195,8 +175,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     g_uTaskbarRestartMsg = RegisterWindowMessageW(L"TaskbarCreated");
 
-    // Initialize OSD and Alert Windows
-    Osd::Init(hInstance);
+    // Initialize Flyout Notification, WinUI Settings, and Low-Battery Alert Windows
+    Flyout::Init(hInstance);
+    Settings::Init(hInstance, g_hMainWnd);
     Alert::Init(hInstance);
 
     // Register PnP Device notifications
@@ -213,7 +194,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     g_nid.uCallbackMessage = WM_APP_TRAYMSG;
     g_nid.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
-    StringCchCopyW(g_nid.szTip, ARRAYSIZE(g_nid.szTip), L"雷柏游戏鼠标 (正在连接...)");
+    StringCchCopyW(g_nid.szTip, ARRAYSIZE(g_nid.szTip), L"外设电量监控 (正在连接...)");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
     // Start background HID Device Manager
@@ -232,7 +213,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         hDevNotify = NULL;
     }
     Device::Stop();
-    Osd::Cleanup();
+    Settings::Cleanup();
+    Flyout::Cleanup();
     Alert::Cleanup();
 
     CloseHandle(hMutex);

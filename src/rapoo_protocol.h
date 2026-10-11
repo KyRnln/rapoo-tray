@@ -29,12 +29,15 @@ struct DeviceStatus {
     int dpiX = 800;
     int dpiY = 800;
     int battery = 100;
+    int pollingHz = 0;
     bool isCharging = false;
-    bool isWired = false; // device marker 0x10=wired, 0x20=2.4G dongle
+    bool isWired = false;
+    bool rfConnected = true;
 };
 
 // Packet Builders
 DWORD BuildUnlockPacket(BYTE* outBuf, DWORD bufSize);
+DWORD BuildRequestStatusPacket(BYTE* outBuf, DWORD bufSize);
 DWORD BuildWriteCommand(BYTE bank, BYTE addr, const BYTE* pData, BYTE dataLen, BYTE* outBuf, DWORD bufSize);
 DWORD BuildReadCommand(BYTE bank, BYTE addr, BYTE readLen, BYTE* outBuf, DWORD bufSize);
 

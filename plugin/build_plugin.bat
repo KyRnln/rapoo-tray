@@ -4,6 +4,13 @@ cd /d "%~dp0"
 
 if not exist ..\bin mkdir ..\bin
 
+where g++ >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    if exist "%LOCALAPPDATA%\Programs\w64devkit\bin\g++.exe" (
+        set "PATH=%LOCALAPPDATA%\Programs\w64devkit\bin;%PATH%"
+    )
+)
+
 echo ========================================================
 echo   Building TrafficMonitor Rapoo Plugin (rapoo-plugin.dll)
 echo ========================================================

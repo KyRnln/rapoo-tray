@@ -4,6 +4,13 @@ cd /d "%~dp0"
 
 if not exist ..\dist mkdir ..\dist
 
+where g++ >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    if exist "%LOCALAPPDATA%\Programs\w64devkit\bin\g++.exe" (
+        set "PATH=%LOCALAPPDATA%\Programs\w64devkit\bin;%PATH%"
+    )
+)
+
 echo [Building Installer Resource...]
 windres --codepage 65001 -i installer.rc -o installer.o -O coff
 

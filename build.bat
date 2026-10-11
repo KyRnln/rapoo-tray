@@ -4,6 +4,16 @@ cd /d "%~dp0"
 
 if not exist bin mkdir bin
 
+taskkill /F /IM rapoo-tray.exe >nul 2>nul
+if exist bin\rapoo-tray.exe del /F /Q bin\rapoo-tray.exe >nul 2>nul
+
+where g++ >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    if exist "%LOCALAPPDATA%\Programs\w64devkit\bin\g++.exe" (
+        set "PATH=%LOCALAPPDATA%\Programs\w64devkit\bin;%PATH%"
+    )
+)
+
 echo ========================================================
 echo   Building rapoo-tray (Release Standalone Executable)
 echo ========================================================
@@ -12,7 +22,7 @@ where g++ >nul 2>nul
 if %ERRORLEVEL% equ 0 (
     echo [Toolchain] Using MinGW GCC/G++ ...
     windres --codepage 65001 -I res -i res\app.rc -o bin\app.o
-    g++ -O3 -mwindows -municode -s -static src\main.cpp src\rapoo_protocol.cpp src\device_manager.cpp src\osd_window.cpp src\tray_menu.cpp src\alert_window.cpp bin\app.o -lsetupapi -lhid -luser32 -lgdi32 -lshell32 -ladvapi32 -luxtheme -ldwmapi -o bin\rapoo-tray.exe
+    g++ -O3 -mwindows -municode -s -static src\main.cpp src\rapoo_protocol.cpp src\device_manager.cpp src\osd_window.cpp src\tray_menu.cpp src\alert_window.cpp src\flyout_window.cpp src\settings_window.cpp bin\app.o -lsetupapi -lhid -luser32 -lgdi32 -lshell32 -ladvapi32 -lole32 -luuid -luxtheme -ldwmapi -o bin\rapoo-tray.exe
     if exist bin\app.o del bin\app.o
     goto done
 )
@@ -21,7 +31,7 @@ where cl >nul 2>nul
 if %ERRORLEVEL% equ 0 (
     echo [Toolchain] Using MSVC CL ...
     rc /c 65001 /fo bin\app.res res\app.rc
-    cl /nologo /O2 /MT /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN src\main.cpp src\rapoo_protocol.cpp src\device_manager.cpp src\osd_window.cpp src\tray_menu.cpp src\alert_window.cpp bin\app.res /Fe:bin\rapoo-tray.exe /link /SUBSYSTEM:WINDOWS setupapi.lib hid.lib user32.lib gdi32.lib shell32.lib advapi32.lib uxtheme.lib dwmapi.lib
+    cl /nologo /O2 /MT /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN src\main.cpp src\rapoo_protocol.cpp src\device_manager.cpp src\osd_window.cpp src\tray_menu.cpp src\alert_window.cpp src\flyout_window.cpp src\settings_window.cpp bin\app.res /Fe:bin\rapoo-tray.exe /link /SUBSYSTEM:WINDOWS setupapi.lib hid.lib user32.lib gdi32.lib shell32.lib advapi32.lib ole32.lib uxtheme.lib dwmapi.lib
     if exist bin\app.res del bin\app.res
     if exist *.obj del *.obj
     goto done
