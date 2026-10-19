@@ -520,7 +520,7 @@ static void InferBrandAndCategory(const std::wstring& name, const std::wstring& 
         StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"罗技 Logitech");
     } else if (lowerHw.find(L"vid_36f9") != std::wstring::npos || lowerName.find(L"xiberia") != std::wstring::npos || lowerName.find(L"西伯利亚") != std::wstring::npos) {
         StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"西伯利亚 Xiberia");
-    } else if (lowerHw.find(L"vid_1532") != std::wstring::npos || lowerName.find(L"razer") != std::wstring::npos || lowerName.find(L"viper") != std::wstring::npos || lowerName.find(L"deathadder") != std::wstring::npos) {
+    } else if (lowerHw.find(L"vid_1532") != std::wstring::npos || lowerName.find(L"razer") != std::wstring::npos || lowerName.find(L"viper") != std::wstring::npos || lowerName.find(L"deathadder") != std::wstring::npos || lowerName.find(L"orochi") != std::wstring::npos || lowerName.find(L"basilisk") != std::wstring::npos || lowerName.find(L"naga") != std::wstring::npos) {
         StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"雷蛇 Razer");
     } else if (lowerHw.find(L"vid_373b") != std::wstring::npos || lowerName.find(L"atk") != std::wstring::npos || lowerName.find(L"vxe") != std::wstring::npos) {
         StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"ATK / VXE");
@@ -545,7 +545,9 @@ static void InferBrandAndCategory(const std::wstring& name, const std::wstring& 
     // Category detection
     if (lowerName.find(L"mouse") != std::wstring::npos || lowerName.find(L"鼠标") != std::wstring::npos ||
         lowerName.find(L"viper") != std::wstring::npos || lowerName.find(L"superlight") != std::wstring::npos ||
-        lowerName.find(L"mx master") != std::wstring::npos || lowerName.find(L"mx anywhere") != std::wstring::npos) {
+        lowerName.find(L"mx master") != std::wstring::npos || lowerName.find(L"mx anywhere") != std::wstring::npos ||
+        lowerName.find(L"orochi") != std::wstring::npos || lowerName.find(L"deathadder") != std::wstring::npos ||
+        lowerName.find(L"basilisk") != std::wstring::npos || lowerName.find(L"naga") != std::wstring::npos) {
         StringCchCopyW(st.category, ARRAYSIZE(st.category), L"mouse");
     } else if (lowerName.find(L"keyboard") != std::wstring::npos || lowerName.find(L"键盘") != std::wstring::npos ||
                lowerName.find(L"keychron") != std::wstring::npos) {
@@ -565,6 +567,9 @@ static void InferBrandAndCategory(const std::wstring& name, const std::wstring& 
     // Connection type
     if (lowerHw.find(L"bth") != std::wstring::npos || lowerHw.find(L"bluetooth") != std::wstring::npos) {
         StringCchCopyW(st.connType, ARRAYSIZE(st.connType), L"蓝牙 BLE");
+        st.isWired = false;
+    } else if (lowerHw.find(L"vid_1532") != std::wstring::npos) {
+        StringCchCopyW(st.connType, ARRAYSIZE(st.connType), L"2.4G HyperSpeed");
         st.isWired = false;
     } else {
         StringCchCopyW(st.connType, ARRAYSIZE(st.connType), L"无线连接");
@@ -772,6 +777,82 @@ static bool QueryLogitechHidppBattery(HANDLE hDev, BYTE devIdx, int& outBat, boo
         }
     }
     return false;
+}
+
+// Cache last known Razer device state by container key so RF sleep/timeouts never drop the device
+static std::map<std::wstring, BYTE> g_razerTxId;
+static std::map<std::wstring, State> g_razerLastState;
+
+// Query Razer 91-byte Feature Report (Razer Synapse / OpenRazer protocol)
+static bool QueryRazerReport(HANDLE hDev, BYTE txId, BYTE cmdClass, BYTE cmdId, BYTE dataSize, BYTE arg0, BYTE* outResp, BYTE& outStatus) {
+    outStatus = 0;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        BYTE req[91] = {0};
+        req[0] = 0x00; // Windows HID Report ID
+        req[1] = 0x00; // Status
+        req[2] = txId; // Transaction ID
+        req[6] = dataSize;
+        req[7] = cmdClass;
+        req[8] = cmdId;
+        req[9] = arg0;
+        BYTE crc = 0;
+        for (int i = 3; i <= 88; ++i) crc ^= req[i];
+        req[89] = crc;
+
+        if (!HidD_SetFeature(hDev, req, 91)) return false;
+
+        for (int poll = 0; poll < 4; ++poll) {
+            Sleep(15);
+            BYTE resp[91] = {0};
+            if (!HidD_GetFeature(hDev, resp, 91)) break;
+            if (resp[7] != cmdClass || resp[8] != cmdId) continue;
+            outStatus = resp[1];
+            if (resp[1] == 0x02) { // Success
+                if (outResp) memcpy(outResp, resp, 91);
+                return true;
+            }
+            if (resp[1] == 0x01) continue; // Busy, keep polling
+            break;
+        }
+        if (outStatus == 0x04 || outStatus == 0x05) break;
+        Sleep(10);
+    }
+    return false;
+}
+
+static bool QueryRazerDeviceStatus(HANDLE hDev, const std::wstring& key, bool& outOnline, int& outBat, bool& outCharging) {
+    BYTE txId = g_razerTxId[key];
+    if (txId == 0) txId = 0x1F;
+    txId = ((txId + 1) & 0x7F);
+    if (txId == 0) txId = 1;
+    g_razerTxId[key] = txId;
+
+    outOnline = false;
+    outBat = 0;
+    outCharging = false;
+
+    // 1. Query battery status (cmdClass = 0x07, cmdId = 0x80, dataSize = 0x02)
+    BYTE resp[91] = {0};
+    BYTE status = 0;
+    if (QueryRazerReport(hDev, txId, 0x07, 0x80, 0x02, 0x00, resp, status)) {
+        int raw = (int)resp[10];
+        if (raw > 0) {
+            outOnline = true;
+            outBat = (raw * 100 + 127) / 255;
+            if (outBat > 100) outBat = 100;
+        }
+    }
+
+    // 2. Query charging status (cmdClass = 0x07, cmdId = 0x84, dataSize = 0x02) if online
+    if (outOnline) {
+        BYTE chgResp[91] = {0};
+        BYTE chgStatus = 0;
+        if (QueryRazerReport(hDev, txId, 0x07, 0x84, 0x02, 0x00, chgResp, chgStatus)) {
+            outCharging = (chgResp[10] != 0);
+        }
+    }
+
+    return outOnline;
 }
 
 static std::vector<State> DiscoverExternalBatteryDevices() {
@@ -986,6 +1067,67 @@ static std::vector<State> DiscoverExternalBatteryDevices() {
                                         SaveCachedBattery(st.id, st.battery);
                                         extMap[key] = st;
                                     }
+                                }
+                                HidD_FreePreparsedData(pData);
+                            }
+                            CloseHandle(hDev);
+                        }
+                    }
+                }
+
+                // Check Razer 91-byte Feature Report interface (VID_1532)
+                if (wcsstr(lowerPath, L"vid_1532")) {
+                    GUID containerGuid = {0};
+                    DEVPROPTYPE propType = 0;
+                    std::wstring key = L"RAZER_DEFAULT";
+                    if (SetupDiGetDevicePropertyW(hHidInfo, &devInfo, &PKEY_Win_ContainerId, &propType, (PBYTE)&containerGuid, sizeof(GUID), NULL, 0)) {
+                        key = L"EXT_" + GuidToString(containerGuid);
+                    }
+
+                    if (extMap.find(key) == extMap.end()) {
+                        HANDLE hDev = CreateFileW(pDetail->DevicePath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                        if (hDev != INVALID_HANDLE_VALUE) {
+                            PHIDP_PREPARSED_DATA pData = NULL;
+                            if (HidD_GetPreparsedData(hDev, &pData)) {
+                                HIDP_CAPS caps;
+                                if (HidP_GetCaps(pData, &caps) == HIDP_STATUS_SUCCESS &&
+                                    caps.FeatureReportByteLength == 91) {
+                                    WCHAR rawProd[64] = {0};
+                                    HidD_GetProductString(hDev, rawProd, sizeof(rawProd));
+
+                                    WCHAR prodName[64] = {0};
+                                    if (_wcsnicmp(rawProd, L"Razer", 5) != 0) {
+                                        StringCchPrintfW(prodName, ARRAYSIZE(prodName), L"Razer %s", rawProd[0] ? rawProd : L"无线鼠标");
+                                    } else {
+                                        StringCchCopyW(prodName, ARRAYSIZE(prodName), rawProd);
+                                    }
+                                    size_t len = wcslen(prodName);
+                                    while (len > 0 && (prodName[len - 1] == L' ' || prodName[len - 1] == L'\t')) {
+                                        prodName[--len] = L'\0';
+                                    }
+
+                                    bool online = false;
+                                    int bat = 0;
+                                    bool charging = false;
+                                    QueryRazerDeviceStatus(hDev, key, online, bat, charging);
+
+                                    State st = {};
+                                    StringCchCopyW(st.id, ARRAYSIZE(st.id), key.c_str());
+                                    StringCchCopyW(st.modelName, ARRAYSIZE(st.modelName), prodName);
+                                    InferBrandAndCategory(prodName, lowerPath, st);
+                                    st.isConnected = online;
+                                    st.isWired = false;
+                                    st.isCharging = online && charging;
+                                    st.hasBattery = true;
+                                    st.battery = (online && bat > 0) ? bat : LoadCachedBattery(st.id, 97);
+                                    if (online && bat > 0) {
+                                        SaveCachedBattery(st.id, st.battery);
+                                    }
+                                    st.hasDpi = false;
+                                    st.hasPolling = false;
+
+                                    g_razerLastState[key] = st;
+                                    extMap[key] = st;
                                 }
                                 HidD_FreePreparsedData(pData);
                             }
@@ -1265,10 +1407,27 @@ static DWORD WINAPI HidWorkerThread(LPVOID) {
 
         // 2. Scan external multi-brand / Bluetooth devices periodically or on PnP change
         DWORD nowTick = GetTickCount();
-        if (listChanged || lastExtScanTick == 0 || (nowTick - lastExtScanTick) >= 10000) {
-            extDevices = DiscoverExternalBatteryDevices();
+        DWORD extInterval = sessions.empty() ? 2500 : 10000;
+        if (listChanged || lastExtScanTick == 0 || (nowTick - lastExtScanTick) >= extInterval) {
+            auto newExt = DiscoverExternalBatteryDevices();
+            bool extDiff = (newExt.size() != extDevices.size());
+            if (!extDiff) {
+                for (size_t i = 0; i < newExt.size(); ++i) {
+                    if (wcscmp(newExt[i].id, extDevices[i].id) != 0 ||
+                        newExt[i].isConnected != extDevices[i].isConnected ||
+                        newExt[i].isCharging != extDevices[i].isCharging ||
+                        newExt[i].battery != extDevices[i].battery ||
+                        wcscmp(newExt[i].modelName, extDevices[i].modelName) != 0) {
+                        extDiff = true;
+                        break;
+                    }
+                }
+            }
+            if (extDiff || listChanged) {
+                extDevices = std::move(newExt);
+                listChanged = true;
+            }
             lastExtScanTick = nowTick;
-            listChanged = true;
         }
 
         if (listChanged) {
@@ -1299,7 +1458,8 @@ static DWORD WINAPI HidWorkerThread(LPVOID) {
             }
         }
 
-        DWORD waitRes = WaitForMultipleObjects((DWORD)waitHandles.size(), waitHandles.data(), FALSE, 3000);
+        DWORD waitTimeout = sessions.empty() ? 2500 : 3000;
+        DWORD waitRes = WaitForMultipleObjects((DWORD)waitHandles.size(), waitHandles.data(), FALSE, waitTimeout);
 
         if (waitRes == WAIT_OBJECT_0) {
             // Stop requested
