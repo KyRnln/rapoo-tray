@@ -522,6 +522,8 @@ static void InferBrandAndCategory(const std::wstring& name, const std::wstring& 
         StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"西伯利亚 Xiberia");
     } else if (lowerHw.find(L"vid_1532") != std::wstring::npos || lowerName.find(L"razer") != std::wstring::npos || lowerName.find(L"viper") != std::wstring::npos || lowerName.find(L"deathadder") != std::wstring::npos || lowerName.find(L"orochi") != std::wstring::npos || lowerName.find(L"basilisk") != std::wstring::npos || lowerName.find(L"naga") != std::wstring::npos) {
         StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"雷蛇 Razer");
+    } else if (lowerHw.find(L"vid_32c2") != std::wstring::npos || lowerName.find(L"hyeku") != std::wstring::npos || lowerName.find(L"黑峡谷") != std::wstring::npos) {
+        StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"黑峡谷 Hyeku");
     } else if (lowerHw.find(L"vid_373b") != std::wstring::npos || lowerName.find(L"atk") != std::wstring::npos || lowerName.find(L"vxe") != std::wstring::npos) {
         StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"ATK / VXE");
     } else if (lowerHw.find(L"vid_045e") != std::wstring::npos || lowerName.find(L"xbox") != std::wstring::npos || lowerName.find(L"surface") != std::wstring::npos) {
@@ -549,8 +551,8 @@ static void InferBrandAndCategory(const std::wstring& name, const std::wstring& 
         lowerName.find(L"orochi") != std::wstring::npos || lowerName.find(L"deathadder") != std::wstring::npos ||
         lowerName.find(L"basilisk") != std::wstring::npos || lowerName.find(L"naga") != std::wstring::npos) {
         StringCchCopyW(st.category, ARRAYSIZE(st.category), L"mouse");
-    } else if (lowerName.find(L"keyboard") != std::wstring::npos || lowerName.find(L"键盘") != std::wstring::npos ||
-               lowerName.find(L"keychron") != std::wstring::npos) {
+    } else if (lowerHw.find(L"vid_32c2") != std::wstring::npos || lowerName.find(L"keyboard") != std::wstring::npos || lowerName.find(L"键盘") != std::wstring::npos ||
+               lowerName.find(L"keychron") != std::wstring::npos || lowerName.find(L"hyeku") != std::wstring::npos || lowerName.find(L"黑峡谷") != std::wstring::npos) {
         StringCchCopyW(st.category, ARRAYSIZE(st.category), L"keyboard");
     } else if (lowerName.find(L"headset") != std::wstring::npos || lowerName.find(L"headphone") != std::wstring::npos ||
                lowerName.find(L"airpods") != std::wstring::npos || lowerName.find(L"buds") != std::wstring::npos ||
@@ -570,6 +572,9 @@ static void InferBrandAndCategory(const std::wstring& name, const std::wstring& 
         st.isWired = false;
     } else if (lowerHw.find(L"vid_1532") != std::wstring::npos) {
         StringCchCopyW(st.connType, ARRAYSIZE(st.connType), L"2.4G HyperSpeed");
+        st.isWired = false;
+    } else if (lowerHw.find(L"vid_32c2") != std::wstring::npos) {
+        StringCchCopyW(st.connType, ARRAYSIZE(st.connType), L"2.4G 无线");
         st.isWired = false;
     } else {
         StringCchCopyW(st.connType, ARRAYSIZE(st.connType), L"无线连接");
@@ -1133,6 +1138,34 @@ static std::vector<State> DiscoverExternalBatteryDevices() {
                             }
                             CloseHandle(hDev);
                         }
+                    }
+                }
+
+                // Check Hyeku (黑峡谷) 2.4G wireless keyboard receiver (VID_32C2)
+                if (wcsstr(lowerPath, L"vid_32c2")) {
+                    GUID containerGuid = {0};
+                    DEVPROPTYPE propType = 0;
+                    std::wstring key = L"HYEKU_DEFAULT";
+                    if (SetupDiGetDevicePropertyW(hHidInfo, &devInfo, &PKEY_Win_ContainerId, &propType, (PBYTE)&containerGuid, sizeof(GUID), NULL, 0)) {
+                        key = L"EXT_" + GuidToString(containerGuid);
+                    }
+
+                    if (extMap.find(key) == extMap.end()) {
+                        State st = {};
+                        StringCchCopyW(st.id, ARRAYSIZE(st.id), key.c_str());
+                        StringCchCopyW(st.modelName, ARRAYSIZE(st.modelName), L"黑峡谷 2.4G 无线键盘");
+                        StringCchCopyW(st.brandName, ARRAYSIZE(st.brandName), L"黑峡谷 Hyeku");
+                        StringCchCopyW(st.category, ARRAYSIZE(st.category), L"keyboard");
+                        StringCchCopyW(st.connType, ARRAYSIZE(st.connType), L"2.4G 无线");
+                        st.isConnected = true;
+                        st.isWired = false;
+                        st.isCharging = false;
+                        st.hasBattery = false;
+                        st.battery = 0;
+                        st.hasDpi = false;
+                        st.hasPolling = false;
+
+                        extMap[key] = st;
                     }
                 }
             }
