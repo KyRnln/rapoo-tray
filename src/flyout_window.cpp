@@ -736,7 +736,7 @@ bool Init(HINSTANCE hInstance) {
     int h = S(VIEWPORT_H_DEFAULT);
 
     g_hWnd = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         FLYOUT_CLASS,
         L"",
         WS_POPUP,
@@ -813,12 +813,12 @@ void Show(HWND hOwnerWnd) {
     g_isShowing = true;
     g_isClosing = false;
 
-    SetWindowPos(g_hWnd, HWND_TOPMOST, targetX, targetY, w, h, SWP_SHOWWINDOW);
+    SetWindowPos(g_hWnd, HWND_TOPMOST, targetX, targetY, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
     if (g_wvHost) {
         g_wvHost->Resize();
         g_wvHost->NotifyPositionChanged();
     }
-    SetForegroundWindow(g_hWnd);
+    // Never call SetForegroundWindow here: passive flyout notifications must not steal focus from games/full-screen apps
     InstallMouseHook();
 
     PushStateToWebView();

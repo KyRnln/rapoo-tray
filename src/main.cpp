@@ -11,6 +11,7 @@ extern "C" {
 #include "tray_menu.h"
 #include "flyout_window.h"
 #include "settings_window.h"
+#include "game_mode.h"
 
 static const UINT WM_APP_TRAYMSG = WM_APP + 1;
 static const UINT WM_APP_STATE_UPDATE = WM_APP + 2;
@@ -56,28 +57,9 @@ static void RefreshTrayUI(const Device::State& state) {
 static void OnDeviceStateChanged(const Device::State& state, DWORD changeMask) {
     if (!g_hMainWnd) return;
 
-    static bool s_prevConnected = false;
-    static bool s_prevWired = false;
-    WPARAM shouldPopupFlyout = 0;
-
-    if (state.isConnected) {
-        bool justConnected = !s_prevConnected;
-        bool modeChanged = s_prevConnected && (s_prevWired != state.isWired);
-        bool dpiChanged = (changeMask & Device::CHANGE_DPI) != 0;
-
-        // Slide in the Windows 11 notification flyout on startup recognition, mode switch, or DPI change
-        if (justConnected || modeChanged || dpiChanged) {
-            shouldPopupFlyout = 1;
-        }
-
-        s_prevConnected = true;
-        s_prevWired = state.isWired;
-    } else {
-        s_prevConnected = false;
-        s_prevWired = false;
-    }
-
-    PostMessageW(g_hMainWnd, WM_APP_STATE_UPDATE, shouldPopupFlyout, 0);
+    // Never auto-popup flyout cards during routine wireless reconnect, sleep wakeups, DPI, or polling updates.
+    // The Flyout panel is a user-initiated dashboard toggled via tray icon.
+    PostMessageW(g_hMainWnd, WM_APP_STATE_UPDATE, 0, 0);
 }
 
 static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -102,7 +84,7 @@ static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
         case WM_APP_STATE_UPDATE: {
             RefreshTrayUI(Device::GetCurrentState());
-            if (wParam == 1) {
+            if (wParam == 1 && !GameMode::IsFullscreenOrGamingActive()) {
                 Flyout::Show(hWnd);
             }
             return 0;

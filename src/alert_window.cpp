@@ -1,4 +1,5 @@
 #include "alert_window.h"
+#include "game_mode.h"
 #include <windows.h>
 #include <windowsx.h>
 #include <dwmapi.h>
@@ -449,7 +450,12 @@ void Hide() {
 }
 
 void CheckBattery(const Device::State& state) {
-    if (!state.isConnected) {
+    if (!state.isConnected || !state.hasBattery || state.battery <= 0) {
+        return;
+    }
+
+    // Suppress popups if user is in a full-screen game, D3D app, or presentation
+    if (GameMode::IsFullscreenOrGamingActive()) {
         return;
     }
 
