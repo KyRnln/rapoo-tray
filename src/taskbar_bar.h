@@ -30,6 +30,10 @@ int GetPosition();
 void SetWidth(int width);
 int GetWidth();
 
+// Vertical spacing between name/percentage and progress bar (0 ~ 8, default 2)
+void SetBarSpacing(int spacing);
+int GetBarSpacing();
+
 // Device Category Icon size adjustment (12 ~ 28, default 18)
 void SetIconSize(int size);
 int GetIconSize();

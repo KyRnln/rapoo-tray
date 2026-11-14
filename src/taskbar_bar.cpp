@@ -25,6 +25,7 @@ static const WCHAR* VAL_WIDTH = L"TaskbarBarWidth";
 static const WCHAR* VAL_ICON_SIZE = L"TaskbarBarIconSize";
 static const WCHAR* VAL_ICON_COLOR = L"TaskbarBarIconColor";
 static const WCHAR* VAL_ICON_ALIGN = L"TaskbarBarIconAlign";
+static const WCHAR* VAL_BAR_SPACING = L"TaskbarBarSpacing";
 static const UINT_PTR TIMER_UPDATE_POS = 2001;
 
 static HWND g_hWnd = NULL;
@@ -35,6 +36,7 @@ static ULONG_PTR g_gdiplusToken = 0;
 static bool s_enabled = true;
 static int s_position = POS_RIGHT; // 0 = left, 1 = center, 2 = right
 static int s_width = 140;          // Base 96-DPI width (100 ~ 280)
+static int s_barSpacing = 2;       // Base 96-DPI spacing between text and progress bar (0 ~ 8, default 2)
 static int s_iconSize = 18;        // Base 96-DPI icon size (12 ~ 28, default 18)
 static int s_iconColorMode = ICON_COLOR_BLACK; // 0 = Black (default), 1 = Accent, 2 = Theme auto
 static int s_iconAlign = ICON_ALIGN_LEFT;      // 0 = Left (default), 1 = Right
@@ -233,6 +235,29 @@ static void SaveIconAlignRegistry(int align) {
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
         DWORD val = (DWORD)align;
         RegSetValueExW(hKey, VAL_ICON_ALIGN, 0, REG_DWORD, (const BYTE*)&val, sizeof(DWORD));
+        RegCloseKey(hKey);
+    }
+}
+
+static int LoadBarSpacingRegistry() {
+    HKEY hKey;
+    DWORD val = 2; // Default 2px
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD type = 0, size = sizeof(DWORD);
+        if (RegQueryValueExW(hKey, VAL_BAR_SPACING, NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            if (val <= 8) return (int)val;
+        }
+        RegCloseKey(hKey);
+    }
+    return 2;
+}
+
+static void SaveBarSpacingRegistry(int spacing) {
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        DWORD val = (DWORD)spacing;
+        RegSetValueExW(hKey, VAL_BAR_SPACING, 0, REG_DWORD, (const BYTE*)&val, sizeof(DWORD));
         RegCloseKey(hKey);
     }
 }
@@ -630,8 +655,12 @@ static void RepaintBar() {
         g.DrawString(szIcon, -1, iconFont.get(), iconRect, &sfCenter, &iconBrush);
 
         // 4. Content: Top row = Device Name + Battery %, Bottom row = Battery Progress Bar
-        int topY = S(4);
         int topH = S(14);
+        int barH = S(4);
+        int spacing = S(s_barSpacing);
+        int totalContentH = topH + spacing + barH;
+        int topY = (pillH - totalContentH) / 2;
+        if (topY < S(1)) topY = S(1);
 
         // Top row font
         std::unique_ptr<Gdiplus::Font> nameFont(CreateTextFont((float)S(10.5f), Gdiplus::FontStyleRegular));
@@ -679,11 +708,10 @@ static void RepaintBar() {
         Gdiplus::SolidBrush pctBrush(barColor);
         g.DrawString(szPct, -1, pctFont.get(), pctRect, &sfRight, &pctBrush);
 
-        // 5. Right-side Bottom row: Battery Progress Bar
+        // 5. Bottom row: Battery Progress Bar
         int barX = contentX;
         int barW = contentW;
-        int barY = S(20);
-        int barH = S(4);
+        int barY = topY + topH + spacing;
 
         // Progress bar background track
         Gdiplus::GraphicsPath trackPath;
@@ -817,6 +845,7 @@ bool Init(HINSTANCE hInstance, HWND hMainWnd) {
     s_enabled = LoadEnabledRegistry();
     s_position = LoadPositionRegistry();
     s_width = LoadWidthRegistry();
+    s_barSpacing = LoadBarSpacingRegistry();
     s_iconSize = LoadIconSizeRegistry();
     s_iconColorMode = LoadIconColorRegistry();
     s_iconAlign = LoadIconAlignRegistry();
@@ -912,6 +941,20 @@ void SetWidth(int width) {
 
 int GetWidth() {
     return s_width;
+}
+
+void SetBarSpacing(int spacing) {
+    if (spacing < 0) spacing = 0;
+    if (spacing > 8) spacing = 8;
+    s_barSpacing = spacing;
+    SaveBarSpacingRegistry(s_barSpacing);
+    if (g_hWnd && IsWindow(g_hWnd) && s_enabled && !s_inGameMode) {
+        RepaintBar();
+    }
+}
+
+int GetBarSpacing() {
+    return s_barSpacing;
 }
 
 void SetIconSize(int size) {

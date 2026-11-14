@@ -151,6 +151,7 @@ static void PushStateToWebView() {
     json += L",taskbarIconSize:" + std::to_wstring(TaskbarBar::GetIconSize());
     json += L",taskbarIconColor:" + std::to_wstring(TaskbarBar::GetIconColorMode());
     json += L",taskbarIconAlign:" + std::to_wstring(TaskbarBar::GetIconAlign());
+    json += L",taskbarSpacing:" + std::to_wstring(TaskbarBar::GetBarSpacing());
     json += L",accent:\"" + accent + L"\"";
     json += L",pinnedId:\"" + pinnedId + L"\"";
     json += L",devices:[";
@@ -1059,6 +1060,22 @@ static std::wstring GetSettingsHtml() {
             </div>
           </div>
         </div>
+
+        <div id="taskbarSpacingCard" class="settings-card" style="--card-idx:6">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE74B;</span>
+            <div class="card-titles">
+              <div class="card-title">进度条上下间距</div>
+              <div class="card-desc">调整设备名称电量与水平进度条的垂直间距 (0px ~ 8px)</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="slider-wrap">
+              <span id="taskbarSpacingVal" class="slider-badge">2 px</span>
+              <input type="range" id="taskbarSpacingSlider" min="0" max="8" step="1" value="2" class="winui-slider">
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- Page 3: General & About -->
@@ -1228,6 +1245,14 @@ static std::wstring GetSettingsHtml() {
   });
   document.getElementById('iconAlignRightBtn').addEventListener('click', () => {
     postMsg('setTaskbarIconAlign:1');
+  });
+
+  const spacingSlider = document.getElementById('taskbarSpacingSlider');
+  const spacingVal = document.getElementById('taskbarSpacingVal');
+  spacingSlider.addEventListener('input', (e) => {
+    const val = e.target.value;
+    spacingVal.textContent = val + ' px';
+    postMsg('setTaskbarSpacing:' + val);
   });
 
   document.getElementById('autoRunToggle').addEventListener('click', () => {
@@ -1556,18 +1581,27 @@ static std::wstring GetSettingsHtml() {
     const iconSizeCard = document.getElementById('taskbarIconSizeCard');
     const iconColorCard = document.getElementById('taskbarIconColorCard');
     const iconAlignCard = document.getElementById('taskbarIconAlignCard');
+    const spacingCard = document.getElementById('taskbarSpacingCard');
     const tbActive = !!payload.taskbarBar;
     if (posCard) posCard.style.display = tbActive ? 'flex' : 'none';
     if (widthCard) widthCard.style.display = tbActive ? 'flex' : 'none';
     if (iconSizeCard) iconSizeCard.style.display = tbActive ? 'flex' : 'none';
     if (iconColorCard) iconColorCard.style.display = tbActive ? 'flex' : 'none';
     if (iconAlignCard) iconAlignCard.style.display = tbActive ? 'flex' : 'none';
+    if (spacingCard) spacingCard.style.display = tbActive ? 'flex' : 'none';
 
     if (typeof payload.taskbarWidth === 'number') {
       const slider = document.getElementById('taskbarWidthSlider');
       const valText = document.getElementById('taskbarWidthVal');
       if (slider) slider.value = payload.taskbarWidth;
       if (valText) valText.textContent = payload.taskbarWidth + ' px';
+    }
+
+    if (typeof payload.taskbarSpacing === 'number') {
+      const slider = document.getElementById('taskbarSpacingSlider');
+      const valText = document.getElementById('taskbarSpacingVal');
+      if (slider) slider.value = payload.taskbarSpacing;
+      if (valText) valText.textContent = payload.taskbarSpacing + ' px';
     }
 
     if (typeof payload.taskbarIconSize === 'number') {
@@ -1728,6 +1762,10 @@ static void EnsureWindowCreated() {
             } else if (msg.rfind(L"setTaskbarIconAlign:", 0) == 0) {
                 int align = _wtoi(msg.substr(20).c_str());
                 TaskbarBar::SetIconAlign(align);
+                PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarSpacing:", 0) == 0) {
+                int sp = _wtoi(msg.substr(18).c_str());
+                TaskbarBar::SetBarSpacing(sp);
                 PushStateToWebView();
             } else if (msg.rfind(L"order:", 0) == 0) {
                 std::wstring rawOrder = msg.substr(6);
