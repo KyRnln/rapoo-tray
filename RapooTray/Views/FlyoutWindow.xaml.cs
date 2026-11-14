@@ -69,11 +69,28 @@ namespace RapooTray.Views
         private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
         private const int DWMWCP_ROUND = 2;
 
+        private static Brush GetBrush(string key, Windows.UI.Color fallback)
+        {
+            try
+            {
+                if (Application.Current.Resources.TryGetValue(key, out var val) && val is Brush b)
+                    return b;
+                string theme = Application.Current.RequestedTheme == ApplicationTheme.Dark ? "Dark" : "Light";
+                if (Application.Current.Resources.ThemeDictionaries.TryGetValue(theme, out var dictObj) && dictObj is ResourceDictionary rd)
+                {
+                    if (rd.TryGetValue(key, out var val2) && val2 is Brush b2)
+                        return b2;
+                }
+            }
+            catch { }
+            return new SolidColorBrush(fallback);
+        }
+
         public FlyoutWindow()
         {
             this.InitializeComponent();
 
-            this.SystemBackdrop = new DesktopAcrylicBackdrop();
+            this.SystemBackdrop = new MicaBackdrop() { Kind = MicaKind.Base };
             this.ExtendsContentIntoTitleBar = true;
 
             _hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -156,6 +173,7 @@ namespace RapooTray.Views
             _appWindow.MoveAndResize(new RectInt32(targetX, targetY, cardWidth, cardHeight));
             this.Activate();
             _isShowing = true;
+            SlideUpStoryboard?.Begin();
         }
 
         public void HideFlyout()
@@ -182,14 +200,14 @@ namespace RapooTray.Views
             {
                 var emptyCard = new Border
                 {
-                    Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+                    Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(16),
                     Child = new TextBlock
                     {
                         Text = "未检测到雷柏外设\n请确认 2.4G 接收器已插入或设备已开机",
                         TextAlignment = TextAlignment.Center,
-                        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                        Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128)),
                         FontSize = 12
                     }
                 };
@@ -207,8 +225,8 @@ namespace RapooTray.Views
         {
             var cardBorder = new Border
             {
-                Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
-                BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+                Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
+                BorderBrush = GetBrush("CardStrokeColorDefaultBrush", Windows.UI.Color.FromArgb(30, 128, 128, 128)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(12, 10, 12, 10)
@@ -230,7 +248,7 @@ namespace RapooTray.Views
                 FontSize = 18,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 10, 0),
-                Foreground = (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"]
+                Foreground = GetBrush("AccentTextFillColorPrimaryBrush", Windows.UI.Color.FromArgb(255, 0, 120, 215))
             };
             Grid.SetColumn(icon, 0);
             headerGrid.Children.Add(icon);
@@ -249,7 +267,7 @@ namespace RapooTray.Views
             {
                 Text = dev.IsConnected ? dev.ConnType : "未连接",
                 FontSize = 11,
-                Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"]
+                Foreground = GetBrush("TextFillColorTertiaryBrush", Windows.UI.Color.FromArgb(120, 128, 128, 128))
             };
             namePanel.Children.Add(subText);
 
@@ -343,14 +361,14 @@ namespace RapooTray.Views
         {
             return new Border
             {
-                Background = (Brush)Application.Current.Resources["SubtleFillColorSecondaryBrush"],
+                Background = GetBrush("SubtleFillColorSecondaryBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(6, 2, 6, 2),
                 Child = new TextBlock
                 {
                     Text = text,
                     FontSize = 10,
-                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                    Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128))
                 }
             };
         }

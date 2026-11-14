@@ -18,6 +18,23 @@ namespace RapooTray.Views
         private const string RunRegKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string AppRunName = "RapooTray";
 
+        private static Brush GetBrush(string key, Windows.UI.Color fallback)
+        {
+            try
+            {
+                if (Application.Current.Resources.TryGetValue(key, out var val) && val is Brush b)
+                    return b;
+                string theme = Application.Current.RequestedTheme == ApplicationTheme.Dark ? "Dark" : "Light";
+                if (Application.Current.Resources.ThemeDictionaries.TryGetValue(theme, out var dictObj) && dictObj is ResourceDictionary rd)
+                {
+                    if (rd.TryGetValue(key, out var val2) && val2 is Brush b2)
+                        return b2;
+                }
+            }
+            catch { }
+            return new SolidColorBrush(fallback);
+        }
+
         public SettingsWindow()
         {
             this.InitializeComponent();
@@ -258,14 +275,14 @@ namespace RapooTray.Views
             {
                 var emptyCard = new Border
                 {
-                    Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+                    Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(24),
                     Child = new TextBlock
                     {
                         Text = "当前未检测到任何雷柏外设。请确认无线接收器已插入或设备已处于开机连接状态。",
                         HorizontalAlignment = HorizontalAlignment.Center,
-                        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                        Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128))
                     }
                 };
                 ContentArea.Children.Add(emptyCard);
@@ -276,8 +293,8 @@ namespace RapooTray.Views
             {
                 var card = new Border
                 {
-                    Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
-                    BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+                    Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
+                    BorderBrush = GetBrush("CardStrokeColorDefaultBrush", Windows.UI.Color.FromArgb(30, 128, 128, 128)),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(16, 12, 16, 12)
@@ -294,7 +311,7 @@ namespace RapooTray.Views
                     FontSize = 24,
                     VerticalAlignment = VerticalAlignment.Center,
                     Margin = new Thickness(0, 0, 16, 0),
-                    Foreground = (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"]
+                    Foreground = GetBrush("AccentTextFillColorPrimaryBrush", Windows.UI.Color.FromArgb(255, 0, 120, 215))
                 };
                 Grid.SetColumn(icon, 0);
                 grid.Children.Add(icon);
@@ -313,7 +330,7 @@ namespace RapooTray.Views
                 {
                     Text = $"{dev.BrandName} · {dev.ConnType} · 电量: {dev.Battery}%",
                     FontSize = 11,
-                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                    Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128))
                 };
                 infoPanel.Children.Add(subInfo);
 
@@ -372,8 +389,7 @@ namespace RapooTray.Views
             // 退出应用
             var exitBtn = new Button
             {
-                Content = "退出程序",
-                Style = (Style)Application.Current.Resources["DefaultButtonStyle"]
+                Content = "退出程序"
             };
             exitBtn.Click += (s, e) =>
             {
@@ -390,8 +406,8 @@ namespace RapooTray.Views
 
             var aboutCard = new Border
             {
-                Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
-                BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+                Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
+                BorderBrush = GetBrush("CardStrokeColorDefaultBrush", Windows.UI.Color.FromArgb(30, 128, 128, 128)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(24)
@@ -409,7 +425,7 @@ namespace RapooTray.Views
             stack.Children.Add(new TextBlock
             {
                 Text = "版本: 2.0.0 (WinUI 3 官方云母架构重构版)\n开发架构: Windows App SDK (WinUI 3) + .NET 8 + Native C++ HID Telemetry Core",
-                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128)),
                 FontSize = 13,
                 LineHeight = 20
             });
@@ -417,7 +433,7 @@ namespace RapooTray.Views
             stack.Children.Add(new TextBlock
             {
                 Text = "特性亮点:\n• 100% 官方 Windows 11 云母 (Mica) 与亚克力 (Acrylic) 材质，告别白底与闪烁\n• Windows 11 任务栏常驻电量指示，随心调节宽度、位置、字号与间距\n• 多设备智能分类显示，支持 DPI、回报率与充电状态实时展现",
-                Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+                Foreground = GetBrush("TextFillColorTertiaryBrush", Windows.UI.Color.FromArgb(120, 128, 128, 128)),
                 FontSize = 12,
                 LineHeight = 18
             });
@@ -439,7 +455,7 @@ namespace RapooTray.Views
             {
                 Text = subtitle,
                 FontSize = 13,
-                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128))
             });
             ContentArea.Children.Add(headerStack);
         }
@@ -448,8 +464,8 @@ namespace RapooTray.Views
         {
             var border = new Border
             {
-                Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
-                BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+                Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
+                BorderBrush = GetBrush("CardStrokeColorDefaultBrush", Windows.UI.Color.FromArgb(30, 128, 128, 128)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(16, 12, 16, 12)
@@ -472,7 +488,7 @@ namespace RapooTray.Views
                 {
                     Text = description,
                     FontSize = 11,
-                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                    Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128))
                 });
             }
 

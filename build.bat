@@ -3,6 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 if not exist bin mkdir bin
+if not exist bin\Release mkdir bin\Release
 
 taskkill /F /IM RapooTray.exe >nul 2>nul
 taskkill /F /IM rapoo-tray.exe >nul 2>nul
@@ -14,40 +15,38 @@ if %ERRORLEVEL% neq 0 (
     )
 )
 
-where dotnet >nul 2>nul
-if %ERRORLEVEL% neq 0 (
+if "%DOTNET_ROOT%"=="" (
     if exist "%LOCALAPPDATA%\Microsoft\dotnet" (
-        set "PATH=%LOCALAPPDATA%\Microsoft\dotnet;%PATH%"
+        set "DOTNET_ROOT=%LOCALAPPDATA%\Microsoft\dotnet"
     )
+)
+if exist "%DOTNET_ROOT%" (
+    set "PATH=%DOTNET_ROOT%;%PATH%"
 )
 
 echo ========================================================
 echo   Building Rapoo Tray (WinUI 3 + Native C++ HID Core)
 echo ========================================================
 
-echo [1/3] Compiling Native C++ Hardware Telemetry Core (rapoo_core.dll) ...
+echo [1/2] Compiling Native C++ Hardware Telemetry Core (rapoo_core.dll) ...
 g++ -shared -o bin\rapoo_core.dll src\rapoo_core.cpp src\device_manager.cpp src\rapoo_protocol.cpp src\taskbar_bar.cpp -O2 -std=c++17 -lhid -lsetupapi -lgdiplus -ldwmapi -lcomctl32 -luser32 -lgdi32 -ladvapi32 -static-libgcc -static-libstdc++
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to compile rapoo_core.dll
     exit /b 1
 )
 
-echo [2/3] Compiling WinUI 3 Application (RapooTray.exe) ...
+echo [2/2] Publishing Self-Contained WinUI 3 App (bin\Release\RapooTray.exe) ...
 cd RapooTray
-dotnet build -c Release -r win-x64
+dotnet publish -c Release -r win-x64 --self-contained true -o "..\bin\Release"
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Failed to build WinUI 3 project.
+    echo [ERROR] Failed to publish WinUI 3 project.
     cd ..
     exit /b 1
 )
 cd ..
 
-echo [3/3] Syncing portable release files to bin\Release\ ...
-if not exist bin\Release mkdir bin\Release
-xcopy /E /Y /Q RapooTray\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\* bin\Release\ >nul
-
 echo.
 echo ========================================================
-echo   [SUCCESS] Build completed! (Portable / No install needed)
-echo   Executable: bin\Release\RapooTray.exe
+echo   [SUCCESS] Build completed! (100%% Portable / Self-Contained)
+echo   Output Executable: bin\Release\RapooTray.exe
 echo ========================================================
