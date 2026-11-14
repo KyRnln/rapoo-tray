@@ -285,6 +285,10 @@ static void RemoveMouseHook() {
 }
 
 static void ConfigureTransparentContainer(HWND hWnd) {
+    bool isDark = IsSystemDarkTheme();
+    BOOL darkVal = isDark ? TRUE : FALSE;
+    DwmSetWindowAttribute(hWnd, 20, &darkVal, sizeof(darkVal)); // DWMWA_USE_IMMERSIVE_DARK_MODE
+
     MARGINS margins = { -1, -1, -1, -1 };
     DwmExtendFrameIntoClientArea(hWnd, &margins);
 
@@ -292,8 +296,14 @@ static void ConfigureTransparentContainer(HWND hWnd) {
     DwmSetWindowAttribute(hWnd, 33, &corner, sizeof(corner));
     COLORREF noBorder = 0xFFFFFFFE; // DWMWA_COLOR_NONE
     DwmSetWindowAttribute(hWnd, 34, &noBorder, sizeof(noBorder));
-    DWORD backdrop = 1; // DWMSBT_NONE
-    DwmSetWindowAttribute(hWnd, 38, &backdrop, sizeof(backdrop));
+
+    // Enable Windows 11 Mica / Acrylic backdrop in DWM
+    DWORD backdrop = 2; // DWMSBT_MAINWINDOW (Mica)
+    HRESULT hr = DwmSetWindowAttribute(hWnd, 38, &backdrop, sizeof(backdrop));
+    if (FAILED(hr)) {
+        BOOL mica = TRUE;
+        DwmSetWindowAttribute(hWnd, 1029, &mica, sizeof(mica));
+    }
 }
 
 static std::wstring GetNotificationHtml() {
@@ -304,20 +314,20 @@ static std::wstring GetNotificationHtml() {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
   :root {
-    --bg-card: #242424;
-    --border-card: rgba(255, 255, 255, 0.22);
-    --divider: rgba(255, 255, 255, 0.16);
+    --bg-card: rgba(32, 32, 32, 0.78);
+    --border-card: rgba(255, 255, 255, 0.16);
+    --divider: rgba(255, 255, 255, 0.10);
     --text-primary: #FFFFFF;
     --text-secondary: rgba(255, 255, 255, 0.72);
     --text-muted: rgba(255, 255, 255, 0.48);
-    --track-bg: rgba(255, 255, 255, 0.12);
+    --track-bg: rgba(255, 255, 255, 0.14);
     --accent: #60CDFF;
   }
 
   body.light {
-    --bg-card: #F9F9FB;
-    --border-card: #D4D4D8;
-    --divider: #DFDFE3;
+    --bg-card: rgba(246, 246, 248, 0.82);
+    --border-card: rgba(0, 0, 0, 0.12);
+    --divider: rgba(0, 0, 0, 0.08);
     --text-primary: #1A1A1A;
     --text-secondary: rgba(0, 0, 0, 0.65);
     --text-muted: rgba(0, 0, 0, 0.46);
@@ -341,11 +351,13 @@ static std::wstring GetNotificationHtml() {
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Pure Windows 11 Notification Card: No glow/shadow, crisp 1px light-gray line border, zero inner padding so device dividers span full width */
+  /* Windows 11 Mica / Acrylic Translucent Card */
   .toast-card {
     width: 100%;
     height: 100%;
     background: var(--bg-card);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
     border: 1px solid var(--border-card);
     border-radius: 8px;
     padding: 0;
@@ -771,10 +783,6 @@ static std::wstring GetNotificationHtml() {
 static LRESULT CALLBACK FlyoutWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_ERASEBKGND: {
-            HDC hdc = (HDC)wParam;
-            RECT rc;
-            GetClientRect(hWnd, &rc);
-            FillRect(hdc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
             return 1;
         }
 
@@ -824,7 +832,7 @@ bool Init(HINSTANCE hInstance) {
     wc.lpfnWndProc = FlyoutWndProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc.hbrBackground = NULL;
     wc.lpszClassName = FLYOUT_CLASS;
     RegisterClassExW(&wc);
 
@@ -906,6 +914,8 @@ void Show(HWND hOwnerWnd) {
 
     g_isShowing = true;
     g_isClosing = false;
+
+    ConfigureTransparentContainer(g_hWnd);
 
     SetWindowPos(g_hWnd, HWND_TOPMOST, targetX, targetY, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
     if (g_wvHost) {

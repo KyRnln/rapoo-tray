@@ -38,21 +38,28 @@ int GetBarSpacing();
 void SetIconSize(int size);
 int GetIconSize();
 
-// Device Category Icon color mode (0 = Black [default], 1 = Accent, 2 = Theme auto)
+// Device Category Icon vertical offset (-8 ~ 8, default 0)
+void SetIconOffsetY(int offset);
+int GetIconOffsetY();
+
+// Taskbar bar text font size (9 ~ 16, default 11)
+void SetFontSize(int size);
+int GetFontSize();
+
+// Device Category Icon color mode (0 = Theme auto [default], 1 = Black, 2 = Accent)
 enum IconColorMode {
-    ICON_COLOR_BLACK = 0,
-    ICON_COLOR_ACCENT = 1,
-    ICON_COLOR_THEME = 2
+    ICON_COLOR_THEME = 0,
+    ICON_COLOR_BLACK = 1,
+    ICON_COLOR_ACCENT = 2
 };
 void SetIconColorMode(int mode);
 int GetIconColorMode();
 
-// Battery Progress Bar color mode (0 = Smart Status [default], 1 = Black, 2 = Accent, 3 = Theme auto)
+// Battery Progress Bar color mode (0 = Theme auto [default], 1 = Black, 2 = Accent)
 enum BarColorMode {
-    BAR_COLOR_STATUS = 0,
+    BAR_COLOR_THEME = 0,
     BAR_COLOR_BLACK = 1,
-    BAR_COLOR_ACCENT = 2,
-    BAR_COLOR_THEME = 3
+    BAR_COLOR_ACCENT = 2
 };
 void SetBarColorMode(int mode);
 int GetBarColorMode();

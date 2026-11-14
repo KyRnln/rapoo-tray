@@ -125,7 +125,12 @@ static void ApplyWin11MicaFrame(HWND hWnd) {
     DwmExtendFrameIntoClientArea(hWnd, &margins);
 
     DWORD backdrop = 2; // DWMSBT_MAINWINDOW (Mica)
-    DwmSetWindowAttribute(hWnd, 38, &backdrop, sizeof(backdrop));
+    HRESULT hr = DwmSetWindowAttribute(hWnd, 38, &backdrop, sizeof(backdrop));
+    if (FAILED(hr)) {
+        // Fallback for Windows 11 21H2 (Build 22000: DWMWA_MICA = 1029)
+        BOOL mica = TRUE;
+        DwmSetWindowAttribute(hWnd, 1029, &mica, sizeof(mica));
+    }
 }
 
 static void PushStateToWebView() {
@@ -149,6 +154,8 @@ static void PushStateToWebView() {
     json += L",taskbarPos:" + std::to_wstring(TaskbarBar::GetPosition());
     json += L",taskbarWidth:" + std::to_wstring(TaskbarBar::GetWidth());
     json += L",taskbarIconSize:" + std::to_wstring(TaskbarBar::GetIconSize());
+    json += L",taskbarIconOffsetY:" + std::to_wstring(TaskbarBar::GetIconOffsetY());
+    json += L",taskbarFontSize:" + std::to_wstring(TaskbarBar::GetFontSize());
     json += L",taskbarIconColor:" + std::to_wstring(TaskbarBar::GetIconColorMode());
     json += L",taskbarBarColor:" + std::to_wstring(TaskbarBar::GetBarColorMode());
     json += L",taskbarIconAlign:" + std::to_wstring(TaskbarBar::GetIconAlign());
@@ -1029,42 +1036,73 @@ static std::wstring GetSettingsHtml() {
           </div>
         </div>
 
-        <div id="taskbarIconColorCard" class="settings-card" style="--card-idx:4">
+        <div id="taskbarIconOffsetYCard" class="settings-card" style="--card-idx:4">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE74B;</span>
+            <div class="card-titles">
+              <div class="card-title">设备图标上下偏移</div>
+              <div class="card-desc">微调常驻进度条旁的设备图标垂直位置 (-8px ~ 8px)</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="slider-wrap">
+              <span id="taskbarIconOffsetYVal" class="slider-badge">0 px</span>
+              <input type="range" id="taskbarIconOffsetYSlider" min="-8" max="8" step="1" value="0" class="winui-slider">
+            </div>
+          </div>
+        </div>
+
+        <div id="taskbarFontSizeCard" class="settings-card" style="--card-idx:5">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE8D2;</span>
+            <div class="card-titles">
+              <div class="card-title">文本字体大小</div>
+              <div class="card-desc">调整常驻进度条内设备名称与电量文本字号 (9px ~ 16px)</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="slider-wrap">
+              <span id="taskbarFontSizeVal" class="slider-badge">11 px</span>
+              <input type="range" id="taskbarFontSizeSlider" min="9" max="16" step="1" value="11" class="winui-slider">
+            </div>
+          </div>
+        </div>
+
+        <div id="taskbarIconColorCard" class="settings-card" style="--card-idx:6">
           <div class="card-left">
             <span class="fluent-icon card-icon">&#xE790;</span>
             <div class="card-titles">
               <div class="card-title">设备图标颜色</div>
-              <div class="card-desc">设备图标颜色默认为黑色，亦可根据主题自定义</div>
+              <div class="card-desc">设备图标颜色默认为跟随主题，亦可自定义纯黑或强调色</div>
             </div>
           </div>
           <div class="card-right">
             <div class="segmented-pill">
-              <button id="iconColBlackBtn" class="seg-btn active">黑色 (默认)</button>
+              <button id="iconColThemeBtn" class="seg-btn active">跟随主题 (默认)</button>
+              <button id="iconColBlackBtn" class="seg-btn">黑色</button>
               <button id="iconColAccentBtn" class="seg-btn">强调色</button>
-              <button id="iconColThemeBtn" class="seg-btn">跟随主题</button>
             </div>
           </div>
         </div>
 
-        <div id="taskbarBarColorCard" class="settings-card" style="--card-idx:5">
+        <div id="taskbarBarColorCard" class="settings-card" style="--card-idx:7">
           <div class="card-left">
             <span class="fluent-icon card-icon">&#xE790;</span>
             <div class="card-titles">
               <div class="card-title">进度条电量颜色</div>
-              <div class="card-desc">电量进度条与百分比颜色，可选择智能状态色或跟随个性化</div>
+              <div class="card-desc">电量进度条与百分比颜色，默认为跟随主题</div>
             </div>
           </div>
           <div class="card-right">
             <div class="segmented-pill">
-              <button id="barColStatusBtn" class="seg-btn active">智能状态 (默认)</button>
+              <button id="barColThemeBtn" class="seg-btn active">跟随主题 (默认)</button>
               <button id="barColBlackBtn" class="seg-btn">黑色</button>
               <button id="barColAccentBtn" class="seg-btn">强调色</button>
-              <button id="barColThemeBtn" class="seg-btn">跟随主题</button>
             </div>
           </div>
         </div>
 
-        <div id="taskbarIconAlignCard" class="settings-card" style="--card-idx:6">
+        <div id="taskbarIconAlignCard" class="settings-card" style="--card-idx:8">
           <div class="card-left">
             <span class="fluent-icon card-icon">&#xE8AB;</span>
             <div class="card-titles">
@@ -1080,7 +1118,7 @@ static std::wstring GetSettingsHtml() {
           </div>
         </div>
 
-        <div id="taskbarSpacingCard" class="settings-card" style="--card-idx:7">
+        <div id="taskbarSpacingCard" class="settings-card" style="--card-idx:9">
           <div class="card-left">
             <span class="fluent-icon card-icon">&#xE74B;</span>
             <div class="card-titles">
@@ -1249,17 +1287,33 @@ static std::wstring GetSettingsHtml() {
     postMsg('setTaskbarIconSize:' + val);
   });
 
-  document.getElementById('iconColBlackBtn').addEventListener('click', () => {
+  const iconOffsetYSlider = document.getElementById('taskbarIconOffsetYSlider');
+  const iconOffsetYVal = document.getElementById('taskbarIconOffsetYVal');
+  iconOffsetYSlider.addEventListener('input', (e) => {
+    const val = e.target.value;
+    iconOffsetYVal.textContent = (val > 0 ? ('+' + val) : val) + ' px';
+    postMsg('setTaskbarIconOffsetY:' + val);
+  });
+
+  const fontSizeSlider = document.getElementById('taskbarFontSizeSlider');
+  const fontSizeVal = document.getElementById('taskbarFontSizeVal');
+  fontSizeSlider.addEventListener('input', (e) => {
+    const val = e.target.value;
+    fontSizeVal.textContent = val + ' px';
+    postMsg('setTaskbarFontSize:' + val);
+  });
+
+  document.getElementById('iconColThemeBtn').addEventListener('click', () => {
     postMsg('setTaskbarIconColor:0');
   });
-  document.getElementById('iconColAccentBtn').addEventListener('click', () => {
+  document.getElementById('iconColBlackBtn').addEventListener('click', () => {
     postMsg('setTaskbarIconColor:1');
   });
-  document.getElementById('iconColThemeBtn').addEventListener('click', () => {
+  document.getElementById('iconColAccentBtn').addEventListener('click', () => {
     postMsg('setTaskbarIconColor:2');
   });
 
-  document.getElementById('barColStatusBtn').addEventListener('click', () => {
+  document.getElementById('barColThemeBtn').addEventListener('click', () => {
     postMsg('setTaskbarBarColor:0');
   });
   document.getElementById('barColBlackBtn').addEventListener('click', () => {
@@ -1267,9 +1321,6 @@ static std::wstring GetSettingsHtml() {
   });
   document.getElementById('barColAccentBtn').addEventListener('click', () => {
     postMsg('setTaskbarBarColor:2');
-  });
-  document.getElementById('barColThemeBtn').addEventListener('click', () => {
-    postMsg('setTaskbarBarColor:3');
   });
 
   document.getElementById('iconAlignLeftBtn').addEventListener('click', () => {
@@ -1611,6 +1662,8 @@ static std::wstring GetSettingsHtml() {
     const posCard = document.getElementById('taskbarPosCard');
     const widthCard = document.getElementById('taskbarWidthCard');
     const iconSizeCard = document.getElementById('taskbarIconSizeCard');
+    const iconOffsetYCard = document.getElementById('taskbarIconOffsetYCard');
+    const fontSizeCard = document.getElementById('taskbarFontSizeCard');
     const iconColorCard = document.getElementById('taskbarIconColorCard');
     const barColorCard = document.getElementById('taskbarBarColorCard');
     const iconAlignCard = document.getElementById('taskbarIconAlignCard');
@@ -1619,6 +1672,8 @@ static std::wstring GetSettingsHtml() {
     if (posCard) posCard.style.display = tbActive ? 'flex' : 'none';
     if (widthCard) widthCard.style.display = tbActive ? 'flex' : 'none';
     if (iconSizeCard) iconSizeCard.style.display = tbActive ? 'flex' : 'none';
+    if (iconOffsetYCard) iconOffsetYCard.style.display = tbActive ? 'flex' : 'none';
+    if (fontSizeCard) fontSizeCard.style.display = tbActive ? 'flex' : 'none';
     if (iconColorCard) iconColorCard.style.display = tbActive ? 'flex' : 'none';
     if (barColorCard) barColorCard.style.display = tbActive ? 'flex' : 'none';
     if (iconAlignCard) iconAlignCard.style.display = tbActive ? 'flex' : 'none';
@@ -1645,26 +1700,38 @@ static std::wstring GetSettingsHtml() {
       if (valText) valText.textContent = payload.taskbarIconSize + ' px';
     }
 
+    if (typeof payload.taskbarIconOffsetY === 'number') {
+      const slider = document.getElementById('taskbarIconOffsetYSlider');
+      const valText = document.getElementById('taskbarIconOffsetYVal');
+      if (slider) slider.value = payload.taskbarIconOffsetY;
+      if (valText) valText.textContent = (payload.taskbarIconOffsetY > 0 ? ('+' + payload.taskbarIconOffsetY) : payload.taskbarIconOffsetY) + ' px';
+    }
+
+    if (typeof payload.taskbarFontSize === 'number') {
+      const slider = document.getElementById('taskbarFontSizeSlider');
+      const valText = document.getElementById('taskbarFontSizeVal');
+      if (slider) slider.value = payload.taskbarFontSize;
+      if (valText) valText.textContent = payload.taskbarFontSize + ' px';
+    }
+
     const iconCol = (typeof payload.taskbarIconColor === 'number') ? payload.taskbarIconColor : 0;
+    const colT = document.getElementById('iconColThemeBtn');
     const colB = document.getElementById('iconColBlackBtn');
     const colA = document.getElementById('iconColAccentBtn');
-    const colT = document.getElementById('iconColThemeBtn');
-    if (colB && colA && colT) {
-      colB.classList.toggle('active', iconCol === 0);
-      colA.classList.toggle('active', iconCol === 1);
-      colT.classList.toggle('active', iconCol === 2);
+    if (colT && colB && colA) {
+      colT.classList.toggle('active', iconCol === 0);
+      colB.classList.toggle('active', iconCol === 1);
+      colA.classList.toggle('active', iconCol === 2);
     }
 
     const barCol = (typeof payload.taskbarBarColor === 'number') ? payload.taskbarBarColor : 0;
-    const bColS = document.getElementById('barColStatusBtn');
+    const bColT = document.getElementById('barColThemeBtn');
     const bColB = document.getElementById('barColBlackBtn');
     const bColA = document.getElementById('barColAccentBtn');
-    const bColT = document.getElementById('barColThemeBtn');
-    if (bColS && bColB && bColA && bColT) {
-      bColS.classList.toggle('active', barCol === 0);
+    if (bColT && bColB && bColA) {
+      bColT.classList.toggle('active', barCol === 0);
       bColB.classList.toggle('active', barCol === 1);
       bColA.classList.toggle('active', barCol === 2);
-      bColT.classList.toggle('active', barCol === 3);
     }
 
     const iconAlign = (typeof payload.taskbarIconAlign === 'number') ? payload.taskbarIconAlign : 0;
@@ -1688,10 +1755,6 @@ static std::wstring GetSettingsHtml() {
 static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_ERASEBKGND: {
-            HDC hdc = (HDC)wParam;
-            RECT rc;
-            GetClientRect(hWnd, &rc);
-            FillRect(hdc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
             return 1;
         }
 
@@ -1801,6 +1864,14 @@ static void EnsureWindowCreated() {
                 int sz = _wtoi(msg.substr(19).c_str());
                 TaskbarBar::SetIconSize(sz);
                 PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarIconOffsetY:", 0) == 0) {
+                int off = _wtoi(msg.substr(22).c_str());
+                TaskbarBar::SetIconOffsetY(off);
+                PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarFontSize:", 0) == 0) {
+                int fs = _wtoi(msg.substr(19).c_str());
+                TaskbarBar::SetFontSize(fs);
+                PushStateToWebView();
             } else if (msg.rfind(L"setTaskbarIconColor:", 0) == 0) {
                 int mode = _wtoi(msg.substr(20).c_str());
                 TaskbarBar::SetIconColorMode(mode);
@@ -1870,7 +1941,7 @@ bool Init(HINSTANCE hInstance, HWND hMainAppWnd) {
     wc.hIcon = NULL;
     wc.hIconSm = NULL;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc.hbrBackground = NULL;
     wc.lpszClassName = SETTINGS_CLASS;
     RegisterClassExW(&wc);
 

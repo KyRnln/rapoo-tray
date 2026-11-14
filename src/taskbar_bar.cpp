@@ -25,8 +25,10 @@ static const WCHAR* VAL_WIDTH = L"TaskbarBarWidth";
 static const WCHAR* VAL_ICON_SIZE = L"TaskbarBarIconSize";
 static const WCHAR* VAL_ICON_COLOR = L"TaskbarBarIconColor";
 static const WCHAR* VAL_ICON_ALIGN = L"TaskbarBarIconAlign";
+static const WCHAR* VAL_ICON_OFFSET_Y = L"TaskbarBarIconOffsetY";
 static const WCHAR* VAL_BAR_SPACING = L"TaskbarBarSpacing";
 static const WCHAR* VAL_BAR_COLOR = L"TaskbarBarColor";
+static const WCHAR* VAL_FONT_SIZE = L"TaskbarBarFontSize";
 static const UINT_PTR TIMER_UPDATE_POS = 2001;
 
 static HWND g_hWnd = NULL;
@@ -39,9 +41,11 @@ static int s_position = POS_RIGHT; // 0 = left, 1 = center, 2 = right
 static int s_width = 140;          // Base 96-DPI width (100 ~ 280)
 static int s_barSpacing = 2;       // Base 96-DPI spacing between text and progress bar (0 ~ 8, default 2)
 static int s_iconSize = 18;        // Base 96-DPI icon size (12 ~ 28, default 18)
-static int s_iconColorMode = ICON_COLOR_BLACK; // 0 = Black (default), 1 = Accent, 2 = Theme auto
+static int s_iconOffsetY = 0;      // Base 96-DPI vertical offset for category icon (-8 ~ 8, default 0)
+static int s_fontSize = 11;        // Base 96-DPI text font size (9 ~ 16, default 11)
+static int s_iconColorMode = ICON_COLOR_THEME; // 0 = Theme auto (default), 1 = Black, 2 = Accent
 static int s_iconAlign = ICON_ALIGN_LEFT;      // 0 = Left (default), 1 = Right
-static int s_barColorMode = BAR_COLOR_STATUS;  // 0 = Smart Status (default), 1 = Black, 2 = Accent, 3 = Theme auto
+static int s_barColorMode = BAR_COLOR_THEME;   // 0 = Theme auto (default), 1 = Black, 2 = Accent
 static bool s_isHover = false;
 static bool s_inGameMode = false;
 static Device::State s_currentState = {};
@@ -202,7 +206,7 @@ static void SaveIconSizeRegistry(int size) {
 
 static int LoadIconColorRegistry() {
     HKEY hKey;
-    DWORD val = ICON_COLOR_BLACK; // Default: black
+    DWORD val = ICON_COLOR_THEME; // Default: Follow theme
     if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         DWORD type = 0, size = sizeof(DWORD);
         if (RegQueryValueExW(hKey, VAL_ICON_COLOR, NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
@@ -211,7 +215,7 @@ static int LoadIconColorRegistry() {
         }
         RegCloseKey(hKey);
     }
-    return ICON_COLOR_BLACK;
+    return ICON_COLOR_THEME;
 }
 
 static void SaveIconColorRegistry(int mode) {
@@ -246,6 +250,30 @@ static void SaveIconAlignRegistry(int align) {
     }
 }
 
+static int LoadIconOffsetYRegistry() {
+    HKEY hKey;
+    DWORD val = 0;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD type = 0, size = sizeof(DWORD);
+        if (RegQueryValueExW(hKey, VAL_ICON_OFFSET_Y, NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            int iv = (int)val;
+            if (iv >= -8 && iv <= 8) return iv;
+        }
+        RegCloseKey(hKey);
+    }
+    return 0;
+}
+
+static void SaveIconOffsetYRegistry(int offset) {
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        DWORD val = (DWORD)offset;
+        RegSetValueExW(hKey, VAL_ICON_OFFSET_Y, 0, REG_DWORD, (const BYTE*)&val, sizeof(DWORD));
+        RegCloseKey(hKey);
+    }
+}
+
 static int LoadBarSpacingRegistry() {
     HKEY hKey;
     DWORD val = 2; // Default 2px
@@ -271,16 +299,16 @@ static void SaveBarSpacingRegistry(int spacing) {
 
 static int LoadBarColorRegistry() {
     HKEY hKey;
-    DWORD val = BAR_COLOR_STATUS;
+    DWORD val = BAR_COLOR_THEME; // Default: Follow theme
     if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         DWORD type = 0, size = sizeof(DWORD);
         if (RegQueryValueExW(hKey, VAL_BAR_COLOR, NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
             RegCloseKey(hKey);
-            if (val <= 3) return (int)val;
+            if (val <= 2) return (int)val;
         }
         RegCloseKey(hKey);
     }
-    return BAR_COLOR_STATUS;
+    return BAR_COLOR_THEME;
 }
 
 static void SaveBarColorRegistry(int mode) {
@@ -288,6 +316,29 @@ static void SaveBarColorRegistry(int mode) {
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
         DWORD val = (DWORD)mode;
         RegSetValueExW(hKey, VAL_BAR_COLOR, 0, REG_DWORD, (const BYTE*)&val, sizeof(DWORD));
+        RegCloseKey(hKey);
+    }
+}
+
+static int LoadFontSizeRegistry() {
+    HKEY hKey;
+    DWORD val = 11; // Default 11px
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD type = 0, size = sizeof(DWORD);
+        if (RegQueryValueExW(hKey, VAL_FONT_SIZE, NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            if (val >= 9 && val <= 16) return (int)val;
+        }
+        RegCloseKey(hKey);
+    }
+    return 11;
+}
+
+static void SaveFontSizeRegistry(int size) {
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        DWORD val = (DWORD)size;
+        RegSetValueExW(hKey, VAL_FONT_SIZE, 0, REG_DWORD, (const BYTE*)&val, sizeof(DWORD));
         RegCloseKey(hKey);
     }
 }
@@ -661,28 +712,16 @@ static void RepaintBar() {
         if (battery < 0) battery = 0;
         if (battery > 100) battery = 100;
 
-        Gdiplus::Color barColor(255, aR, aG, aB);
-        if (s_barColorMode == BAR_COLOR_BLACK) {
+        // Progress bar color: DEFAULT IS FOLLOW THEME (0 = Theme auto, 1 = Black, 2 = Accent)
+        Gdiplus::Color barColor(255, 0, 0, 0);
+        if (s_barColorMode == BAR_COLOR_THEME) {
+            barColor = isDark ? Gdiplus::Color(255, 240, 244, 248) : Gdiplus::Color(255, 28, 33, 40);
+        } else if (s_barColorMode == BAR_COLOR_BLACK) {
             barColor = Gdiplus::Color(255, 0, 0, 0);
         } else if (s_barColorMode == BAR_COLOR_ACCENT) {
             barColor = Gdiplus::Color(255, aR, aG, aB);
-        } else if (s_barColorMode == BAR_COLOR_THEME) {
-            barColor = isDark ? Gdiplus::Color(255, 240, 244, 248) : Gdiplus::Color(255, 28, 33, 40);
-        } else {
-            // BAR_COLOR_STATUS (0 = default smart status)
-            if (!st.isConnected) {
-                barColor = Gdiplus::Color(140, 145, 155, 168);
-            } else if (st.isCharging) {
-                barColor = Gdiplus::Color(255, 34, 197, 94); // #22C55E Emerald
-            } else if (battery <= 20) {
-                barColor = Gdiplus::Color(255, 239, 68, 68); // #EF4444 Red
-            } else if (battery <= 35) {
-                barColor = Gdiplus::Color(255, 245, 158, 11); // #F59E0B Amber
-            } else {
-                barColor = Gdiplus::Color(255, aR, aG, aB);
-            }
         }
-        if (!st.isConnected && s_barColorMode != BAR_COLOR_STATUS) {
+        if (!st.isConnected) {
             barColor = Gdiplus::Color(120, barColor.GetR(), barColor.GetG(), barColor.GetB());
         }
 
@@ -692,7 +731,7 @@ static void RepaintBar() {
         if (glyphPt < 8.0f) glyphPt = 8.0f;
         std::unique_ptr<Gdiplus::Font> iconFont(CreateFluentIconFont(glyphPt));
 
-        int iconX = 0, iconY = (pillH - iconBox) / 2;
+        int iconX = 0, iconY = (pillH - iconBox) / 2 + S(s_iconOffsetY);
         int contentX = 0, contentW = 0;
 
         if (s_iconAlign == ICON_ALIGN_RIGHT) {
@@ -715,12 +754,14 @@ static void RepaintBar() {
         sfCenter.SetAlignment(Gdiplus::StringAlignmentCenter);
         sfCenter.SetLineAlignment(Gdiplus::StringAlignmentCenter);
 
-        // Device icon color: DEFAULT IS PURE BLACK (#000000)
-        Gdiplus::Color iconColor(255, 0, 0, 0); // 默认为黑色
-        if (s_iconColorMode == ICON_COLOR_ACCENT) {
-            iconColor = Gdiplus::Color(255, aR, aG, aB);
-        } else if (s_iconColorMode == ICON_COLOR_THEME) {
+        // Device icon color: DEFAULT IS FOLLOW THEME (0 = Theme auto, 1 = Black, 2 = Accent)
+        Gdiplus::Color iconColor(255, 0, 0, 0);
+        if (s_iconColorMode == ICON_COLOR_THEME) {
             iconColor = isDark ? Gdiplus::Color(255, 240, 244, 248) : Gdiplus::Color(255, 28, 33, 40);
+        } else if (s_iconColorMode == ICON_COLOR_BLACK) {
+            iconColor = Gdiplus::Color(255, 0, 0, 0);
+        } else if (s_iconColorMode == ICON_COLOR_ACCENT) {
+            iconColor = Gdiplus::Color(255, aR, aG, aB);
         }
         if (!st.isConnected) {
             iconColor = Gdiplus::Color(120, iconColor.GetR(), iconColor.GetG(), iconColor.GetB());
@@ -740,16 +781,19 @@ static void RepaintBar() {
         g.DrawString(szIcon, -1, iconFont.get(), iconRect, &sfCenter, &iconBrush);
 
         // 4. Content: Top row = Device Name + Battery %, Bottom row = Battery Progress Bar
-        int topH = S(14);
+        int topH = S((int)(s_fontSize * 1.30f + 0.5f));
         int barH = S(4);
         int spacing = S(s_barSpacing);
         int totalContentH = topH + spacing + barH;
         int topY = (pillH - totalContentH) / 2;
         if (topY < S(1)) topY = S(1);
 
-        // Top row font
-        std::unique_ptr<Gdiplus::Font> nameFont(CreateTextFont((float)S(10.5f), Gdiplus::FontStyleRegular));
-        std::unique_ptr<Gdiplus::Font> pctFont(CreateTextFont((float)S(10.0f), Gdiplus::FontStyleBold));
+        // Top row font scaled by personalized font size
+        float namePt = (float)S(s_fontSize);
+        float pctPt = (float)S((int)(s_fontSize * 0.95f + 0.5f));
+        if (pctPt < 8.0f) pctPt = 8.0f;
+        std::unique_ptr<Gdiplus::Font> nameFont(CreateTextFont(namePt, Gdiplus::FontStyleRegular));
+        std::unique_ptr<Gdiplus::Font> pctFont(CreateTextFont(pctPt, Gdiplus::FontStyleBold));
 
         const WCHAR* displayName = st.modelName[0] ? st.modelName : L"无线设备";
 
@@ -958,6 +1002,8 @@ bool Init(HINSTANCE hInstance, HWND hMainWnd) {
     s_width = LoadWidthRegistry();
     s_barSpacing = LoadBarSpacingRegistry();
     s_iconSize = LoadIconSizeRegistry();
+    s_iconOffsetY = LoadIconOffsetYRegistry();
+    s_fontSize = LoadFontSizeRegistry();
     s_iconColorMode = LoadIconColorRegistry();
     s_iconAlign = LoadIconAlignRegistry();
     s_barColorMode = LoadBarColorRegistry();
@@ -1085,8 +1131,36 @@ int GetIconSize() {
     return s_iconSize;
 }
 
+void SetIconOffsetY(int offset) {
+    if (offset < -8) offset = -8;
+    if (offset > 8) offset = 8;
+    s_iconOffsetY = offset;
+    SaveIconOffsetYRegistry(s_iconOffsetY);
+    if (g_hWnd && IsWindow(g_hWnd) && s_enabled && !s_inGameMode) {
+        RepaintBar();
+    }
+}
+
+int GetIconOffsetY() {
+    return s_iconOffsetY;
+}
+
+void SetFontSize(int size) {
+    if (size < 9) size = 9;
+    if (size > 16) size = 16;
+    s_fontSize = size;
+    SaveFontSizeRegistry(s_fontSize);
+    if (g_hWnd && IsWindow(g_hWnd) && s_enabled && !s_inGameMode) {
+        RepaintBar();
+    }
+}
+
+int GetFontSize() {
+    return s_fontSize;
+}
+
 void SetIconColorMode(int mode) {
-    if (mode < 0 || mode > 2) mode = ICON_COLOR_BLACK;
+    if (mode < 0 || mode > 2) mode = ICON_COLOR_THEME;
     s_iconColorMode = mode;
     SaveIconColorRegistry(s_iconColorMode);
     if (g_hWnd && IsWindow(g_hWnd) && s_enabled && !s_inGameMode) {
@@ -1099,7 +1173,7 @@ int GetIconColorMode() {
 }
 
 void SetBarColorMode(int mode) {
-    if (mode < BAR_COLOR_STATUS || mode > BAR_COLOR_THEME) mode = BAR_COLOR_STATUS;
+    if (mode < 0 || mode > 2) mode = BAR_COLOR_THEME;
     s_barColorMode = mode;
     SaveBarColorRegistry(s_barColorMode);
     if (g_hWnd && IsWindow(g_hWnd) && s_enabled && !s_inGameMode) {
