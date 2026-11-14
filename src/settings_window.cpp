@@ -1,6 +1,7 @@
 #include "settings_window.h"
 #include "tray_menu.h"
 #include "flyout_window.h"
+#include "taskbar_bar.h"
 #include "webview2_host.h"
 #include <dwmapi.h>
 #include <uxtheme.h>
@@ -133,6 +134,7 @@ static void PushStateToWebView() {
     std::vector<Device::State> devs = Device::GetAllDevices();
     bool isDark = IsSystemDarkTheme();
     bool autoRun = Tray::IsAutoRunEnabled();
+    bool taskbarBar = TaskbarBar::IsEnabled();
     std::wstring accent = GetSystemAccentHex(isDark);
     std::wstring rawPinned = Device::GetPinnedDeviceId();
     std::wstring pinnedId = EscapeJsString(rawPinned.c_str());
@@ -142,6 +144,13 @@ static void PushStateToWebView() {
     json += isDark ? L"true" : L"false";
     json += L",autoRun:";
     json += autoRun ? L"true" : L"false";
+    json += L",taskbarBar:";
+    json += taskbarBar ? L"true" : L"false";
+    json += L",taskbarPos:" + std::to_wstring(TaskbarBar::GetPosition());
+    json += L",taskbarWidth:" + std::to_wstring(TaskbarBar::GetWidth());
+    json += L",taskbarIconSize:" + std::to_wstring(TaskbarBar::GetIconSize());
+    json += L",taskbarIconColor:" + std::to_wstring(TaskbarBar::GetIconColorMode());
+    json += L",taskbarIconAlign:" + std::to_wstring(TaskbarBar::GetIconAlign());
     json += L",accent:\"" + accent + L"\"";
     json += L",pinnedId:\"" + pinnedId + L"\"";
     json += L",devices:[";
@@ -821,6 +830,89 @@ static std::wstring GetSettingsHtml() {
   .toggle-wrap:active .winui-switch.on .winui-switch-thumb {
     transform: translateX(17px);
   }
+
+  /* Segmented Option Switch */
+  .segmented-pill {
+    display: inline-flex;
+    background: var(--track-bg);
+    border-radius: 6px;
+    padding: 3px;
+    gap: 3px;
+  }
+
+  .seg-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.08s ease;
+  }
+
+  .seg-btn:hover {
+    color: var(--text-primary);
+  }
+
+  .seg-btn.active {
+    background: var(--accent);
+    color: #000000;
+    font-weight: 600;
+  }
+
+  body.light .seg-btn.active {
+    color: #FFFFFF;
+  }
+
+  /* WinUI 3 Slider */
+  .slider-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .slider-badge {
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    min-width: 52px;
+    text-align: right;
+  }
+
+  .winui-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 140px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--track-bg);
+    outline: none;
+    cursor: pointer;
+  }
+
+  .winui-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--card-bg);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    cursor: pointer;
+    transition: transform 0.1s ease;
+  }
+
+  .winui-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+
+  .winui-slider::-webkit-slider-thumb:active {
+    transform: scale(0.95);
+  }
 </style>
 </head>
 <body>
@@ -836,6 +928,10 @@ static std::wstring GetSettingsHtml() {
       <div class="nav-item active" data-page="page-device">
         <span class="fluent-icon nav-icon">&#xE962;</span>
         <span>设备</span>
+      </div>
+      <div class="nav-item" data-page="page-personalization">
+        <span class="fluent-icon nav-icon">&#xE771;</span>
+        <span>个性化</span>
       </div>
       <div class="nav-item" data-page="page-general">
         <span class="fluent-icon nav-icon">&#xE713;</span>
@@ -858,7 +954,114 @@ static std::wstring GetSettingsHtml() {
         <div id="devicesContainer"></div>
       </section>
 
-      <!-- Page 2: General & About -->
+      <!-- Page 2: Personalization (Taskbar Bar, Position, Width, Icon Size & Color) -->
+      <section id="page-personalization" class="page">
+        <div class="page-header-row">
+          <h1 class="page-title">个性化</h1>
+        </div>
+
+        <div class="settings-card" style="--card-idx:0">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE7F4;</span>
+            <div class="card-titles">
+              <div class="card-title">任务栏常驻电量条</div>
+              <div class="card-desc">在任务栏显示电量小组件与水平进度条</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div id="taskbarBarToggle" class="toggle-wrap">
+              <span id="taskbarBarText" class="toggle-label">关</span>
+              <div id="taskbarBarSwitch" class="winui-switch">
+                <div class="winui-switch-thumb"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="taskbarPosCard" class="settings-card" style="--card-idx:1">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE892;</span>
+            <div class="card-titles">
+              <div class="card-title">常驻条停靠位置</div>
+              <div class="card-desc">选择在任务栏靠左侧、居中或靠右侧显示电量小组件</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="segmented-pill">
+              <button id="posLeftBtn" class="seg-btn">靠左侧</button>
+              <button id="posCenterBtn" class="seg-btn">居中</button>
+              <button id="posRightBtn" class="seg-btn active">靠右侧</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="taskbarWidthCard" class="settings-card" style="--card-idx:2">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE799;</span>
+            <div class="card-titles">
+              <div class="card-title">常驻条宽度</div>
+              <div class="card-desc">调整任务栏电量条的显示宽度 (100px ~ 280px)</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="slider-wrap">
+              <span id="taskbarWidthVal" class="slider-badge">140 px</span>
+              <input type="range" id="taskbarWidthSlider" min="100" max="280" step="5" value="140" class="winui-slider">
+            </div>
+          </div>
+        </div>
+
+        <div id="taskbarIconSizeCard" class="settings-card" style="--card-idx:3">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE790;</span>
+            <div class="card-titles">
+              <div class="card-title">设备图标大小</div>
+              <div class="card-desc">调整常驻进度条旁的设备图标尺寸 (12px ~ 28px)</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="slider-wrap">
+              <span id="taskbarIconSizeVal" class="slider-badge">18 px</span>
+              <input type="range" id="taskbarIconSizeSlider" min="12" max="28" step="1" value="18" class="winui-slider">
+            </div>
+          </div>
+        </div>
+
+        <div id="taskbarIconColorCard" class="settings-card" style="--card-idx:4">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE790;</span>
+            <div class="card-titles">
+              <div class="card-title">设备图标颜色</div>
+              <div class="card-desc">设备图标颜色默认为黑色，亦可根据主题自定义</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="segmented-pill">
+              <button id="iconColBlackBtn" class="seg-btn active">黑色 (默认)</button>
+              <button id="iconColAccentBtn" class="seg-btn">强调色</button>
+              <button id="iconColThemeBtn" class="seg-btn">跟随主题</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="taskbarIconAlignCard" class="settings-card" style="--card-idx:5">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE8AB;</span>
+            <div class="card-titles">
+              <div class="card-title">设备图标布局</div>
+              <div class="card-desc">选择设备图标在常驻进度条的左侧或右侧显示</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="segmented-pill">
+              <button id="iconAlignLeftBtn" class="seg-btn active">位于左侧</button>
+              <button id="iconAlignRightBtn" class="seg-btn">位于右侧</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Page 3: General & About -->
       <section id="page-general" class="page">
         <div class="page-header-row">
           <h1 class="page-title">设置</h1>
@@ -976,6 +1179,55 @@ static std::wstring GetSettingsHtml() {
     setTimeout(() => refreshBtn.classList.remove('spinning'), 520);
     postMsg('refresh');
     triggerPageCascade();
+  });
+
+  document.getElementById('taskbarBarToggle').addEventListener('click', () => {
+    postMsg('toggleTaskbarBar');
+  });
+
+  document.getElementById('posLeftBtn').addEventListener('click', () => {
+    postMsg('setTaskbarPos:0');
+  });
+
+  document.getElementById('posCenterBtn').addEventListener('click', () => {
+    postMsg('setTaskbarPos:1');
+  });
+
+  document.getElementById('posRightBtn').addEventListener('click', () => {
+    postMsg('setTaskbarPos:2');
+  });
+
+  const widthSlider = document.getElementById('taskbarWidthSlider');
+  const widthVal = document.getElementById('taskbarWidthVal');
+  widthSlider.addEventListener('input', (e) => {
+    const val = e.target.value;
+    widthVal.textContent = val + ' px';
+    postMsg('setTaskbarWidth:' + val);
+  });
+
+  const iconSizeSlider = document.getElementById('taskbarIconSizeSlider');
+  const iconSizeVal = document.getElementById('taskbarIconSizeVal');
+  iconSizeSlider.addEventListener('input', (e) => {
+    const val = e.target.value;
+    iconSizeVal.textContent = val + ' px';
+    postMsg('setTaskbarIconSize:' + val);
+  });
+
+  document.getElementById('iconColBlackBtn').addEventListener('click', () => {
+    postMsg('setTaskbarIconColor:0');
+  });
+  document.getElementById('iconColAccentBtn').addEventListener('click', () => {
+    postMsg('setTaskbarIconColor:1');
+  });
+  document.getElementById('iconColThemeBtn').addEventListener('click', () => {
+    postMsg('setTaskbarIconColor:2');
+  });
+
+  document.getElementById('iconAlignLeftBtn').addEventListener('click', () => {
+    postMsg('setTaskbarIconAlign:0');
+  });
+  document.getElementById('iconAlignRightBtn').addEventListener('click', () => {
+    postMsg('setTaskbarIconAlign:1');
   });
 
   document.getElementById('autoRunToggle').addEventListener('click', () => {
@@ -1283,6 +1535,66 @@ static std::wstring GetSettingsHtml() {
       renderDevices();
     }
 
+    const tbSw = document.getElementById('taskbarBarSwitch');
+    const tbText = document.getElementById('taskbarBarText');
+    if (tbSw && tbText) {
+      tbSw.classList.toggle('on', !!payload.taskbarBar);
+      tbText.textContent = payload.taskbarBar ? '开' : '关';
+    }
+
+    const pos = (typeof payload.taskbarPos === 'number') ? payload.taskbarPos : 2;
+    const btnL = document.getElementById('posLeftBtn');
+    const btnC = document.getElementById('posCenterBtn');
+    const btnR = document.getElementById('posRightBtn');
+    if (btnL && btnC && btnR) {
+      btnL.classList.toggle('active', pos === 0);
+      btnC.classList.toggle('active', pos === 1);
+      btnR.classList.toggle('active', pos === 2);
+    }
+    const posCard = document.getElementById('taskbarPosCard');
+    const widthCard = document.getElementById('taskbarWidthCard');
+    const iconSizeCard = document.getElementById('taskbarIconSizeCard');
+    const iconColorCard = document.getElementById('taskbarIconColorCard');
+    const iconAlignCard = document.getElementById('taskbarIconAlignCard');
+    const tbActive = !!payload.taskbarBar;
+    if (posCard) posCard.style.display = tbActive ? 'flex' : 'none';
+    if (widthCard) widthCard.style.display = tbActive ? 'flex' : 'none';
+    if (iconSizeCard) iconSizeCard.style.display = tbActive ? 'flex' : 'none';
+    if (iconColorCard) iconColorCard.style.display = tbActive ? 'flex' : 'none';
+    if (iconAlignCard) iconAlignCard.style.display = tbActive ? 'flex' : 'none';
+
+    if (typeof payload.taskbarWidth === 'number') {
+      const slider = document.getElementById('taskbarWidthSlider');
+      const valText = document.getElementById('taskbarWidthVal');
+      if (slider) slider.value = payload.taskbarWidth;
+      if (valText) valText.textContent = payload.taskbarWidth + ' px';
+    }
+
+    if (typeof payload.taskbarIconSize === 'number') {
+      const slider = document.getElementById('taskbarIconSizeSlider');
+      const valText = document.getElementById('taskbarIconSizeVal');
+      if (slider) slider.value = payload.taskbarIconSize;
+      if (valText) valText.textContent = payload.taskbarIconSize + ' px';
+    }
+
+    const iconCol = (typeof payload.taskbarIconColor === 'number') ? payload.taskbarIconColor : 0;
+    const colB = document.getElementById('iconColBlackBtn');
+    const colA = document.getElementById('iconColAccentBtn');
+    const colT = document.getElementById('iconColThemeBtn');
+    if (colB && colA && colT) {
+      colB.classList.toggle('active', iconCol === 0);
+      colA.classList.toggle('active', iconCol === 1);
+      colT.classList.toggle('active', iconCol === 2);
+    }
+
+    const iconAlign = (typeof payload.taskbarIconAlign === 'number') ? payload.taskbarIconAlign : 0;
+    const alL = document.getElementById('iconAlignLeftBtn');
+    const alR = document.getElementById('iconAlignRightBtn');
+    if (alL && alR) {
+      alL.classList.toggle('active', iconAlign === 0);
+      alR.classList.toggle('active', iconAlign === 1);
+    }
+
     const sw = document.getElementById('autoRunSwitch');
     const swText = document.getElementById('autoRunText');
     sw.classList.toggle('on', !!payload.autoRun);
@@ -1393,6 +1705,29 @@ static void EnsureWindowCreated() {
                 PushStateToWebView();
             } else if (msg == L"toggleAutoRun") {
                 Tray::ToggleAutoRun();
+                PushStateToWebView();
+            } else if (msg == L"toggleTaskbarBar") {
+                TaskbarBar::SetEnabled(!TaskbarBar::IsEnabled());
+                PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarPos:", 0) == 0) {
+                int pos = _wtoi(msg.substr(14).c_str());
+                TaskbarBar::SetPosition(pos);
+                PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarWidth:", 0) == 0) {
+                int w = _wtoi(msg.substr(16).c_str());
+                TaskbarBar::SetWidth(w);
+                PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarIconSize:", 0) == 0) {
+                int sz = _wtoi(msg.substr(19).c_str());
+                TaskbarBar::SetIconSize(sz);
+                PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarIconColor:", 0) == 0) {
+                int mode = _wtoi(msg.substr(20).c_str());
+                TaskbarBar::SetIconColorMode(mode);
+                PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarIconAlign:", 0) == 0) {
+                int align = _wtoi(msg.substr(20).c_str());
+                TaskbarBar::SetIconAlign(align);
                 PushStateToWebView();
             } else if (msg.rfind(L"order:", 0) == 0) {
                 std::wstring rawOrder = msg.substr(6);

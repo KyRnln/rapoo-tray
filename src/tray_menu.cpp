@@ -1,6 +1,7 @@
 #include "tray_menu.h"
 #include "flyout_window.h"
 #include "settings_window.h"
+#include "taskbar_bar.h"
 #include <dwmapi.h>
 #include <strsafe.h>
 #include <cstring>
@@ -262,6 +263,15 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
                 DismissAllMenus();
                 if (cmd == 1000) {        // 设置
                     Settings::Show();
+                } else if (cmd == 1003) { // 任务栏常驻条
+                    TaskbarBar::SetEnabled(!TaskbarBar::IsEnabled());
+                    Settings::Invalidate();
+                } else if (cmd == 1004) { // 循环切换常驻位置: 左 -> 中 -> 右 -> 左
+                    int cur = TaskbarBar::GetPosition();
+                    int next = (cur == TaskbarBar::POS_LEFT) ? TaskbarBar::POS_CENTER :
+                               (cur == TaskbarBar::POS_CENTER) ? TaskbarBar::POS_RIGHT : TaskbarBar::POS_LEFT;
+                    TaskbarBar::SetPosition(next);
+                    Settings::Invalidate();
                 } else if (cmd == 1001) { // 开机自启动
                     ToggleAutoRun();
                     Settings::Invalidate();
@@ -393,7 +403,6 @@ void ShowMenu(HWND hWndOwner) {
     }
     if (g_curDpi == 0) g_curDpi = 96;
 
-    // Strictly 3 items as requested: 设置, 开机自启动, 退出程序
     g_mainItems.clear();
 
     bool autoRun = IsAutoRunEnabled();
@@ -403,6 +412,30 @@ void ShowMenu(HWND hWndOwner) {
     itemSettings.iconGlyph = L"\xE713"; // Segoe Fluent Settings icon
     itemSettings.label = L"设置";
     g_mainItems.push_back(itemSettings);
+
+    MenuItemData itemTaskbar = {};
+    itemTaskbar.id = 1003;
+    itemTaskbar.iconGlyph = L"\xE7F4"; // Segoe Fluent Dock/Taskbar icon
+    itemTaskbar.label = L"任务栏常驻条";
+    itemTaskbar.isChecked = TaskbarBar::IsEnabled();
+    g_mainItems.push_back(itemTaskbar);
+
+    if (TaskbarBar::IsEnabled()) {
+        int pos = TaskbarBar::GetPosition();
+        MenuItemData itemPos = {};
+        itemPos.id = 1004;
+        if (pos == TaskbarBar::POS_LEFT) {
+            itemPos.iconGlyph = L"\xE892";
+            itemPos.label = L"常驻位置: 靠左侧";
+        } else if (pos == TaskbarBar::POS_CENTER) {
+            itemPos.iconGlyph = L"\xE894";
+            itemPos.label = L"常驻位置: 居中";
+        } else {
+            itemPos.iconGlyph = L"\xE893";
+            itemPos.label = L"常驻位置: 靠右侧";
+        }
+        g_mainItems.push_back(itemPos);
+    }
 
     MenuItemData itemAuto = {};
     itemAuto.id = 1001;

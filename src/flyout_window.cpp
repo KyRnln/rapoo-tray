@@ -1,5 +1,7 @@
 #include "flyout_window.h"
 #include "tray_menu.h"
+#include "taskbar_bar.h"
+#include "settings_window.h"
 #include "webview2_host.h"
 #include <dwmapi.h>
 #include <uxtheme.h>
@@ -116,11 +118,12 @@ static std::wstring EscapeJsString(const WCHAR* str) {
     return out;
 }
 
-// Compute ideal logical viewport height based on device list (full-width device dividers only)
+// Compute ideal logical viewport height based on device list (including bottom settings footer)
 static int ComputeIdealLogicalHeight(const std::vector<Device::State>& devs) {
-    if (devs.empty()) return 84;
+    const int FOOTER_H = 38; // Bottom settings action bar
+    if (devs.empty()) return 84 + FOOTER_H;
 
-    int totalH = 2; // Top + bottom 1px card border
+    int totalH = 2 + FOOTER_H; // Top + bottom 1px card border + footer
     for (size_t i = 0; i < devs.size(); ++i) {
         bool hasBat = devs[i].hasBattery;
         bool hasMetrics = devs[i].hasDpi || devs[i].hasPolling;
@@ -137,26 +140,57 @@ static int ComputeIdealLogicalHeight(const std::vector<Device::State>& devs) {
             totalH += 1; // 1px full-width device divider
         }
     }
-    return std::min(460, std::max(56, totalH));
+    return std::min(500, std::max(80, totalH));
+}
+
+static void CalculateFlyoutCoords(int w, int h, int* outX, int* outY) {
+    RECT rcBar = {0};
+    bool hasBar = TaskbarBar::GetBarRect(&rcBar);
+
+    POINT pt;
+    if (hasBar) {
+        pt.x = (rcBar.left + rcBar.right) / 2;
+        pt.y = rcBar.top;
+    } else {
+        GetCursorPos(&pt);
+    }
+
+    HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    GetMonitorInfoW(hMon, &mi);
+
+    int targetX = 0;
+    if (hasBar) {
+        targetX = (rcBar.left + rcBar.right) / 2 - w / 2;
+    } else {
+        targetX = mi.rcWork.right - w - S(8);
+    }
+
+    // Identical bottom spacing with the status bar / taskbar as the right-click menu (mi.rcWork.bottom - S(8))
+    int targetY = mi.rcWork.bottom - h - S(8);
+
+    if (targetX + w > mi.rcWork.right - S(8)) targetX = mi.rcWork.right - w - S(8);
+    if (targetX < mi.rcWork.left + S(8)) targetX = mi.rcWork.left + S(8);
+    if (targetY < mi.rcWork.top + S(8)) targetY = mi.rcWork.top + S(8);
+
+    *outX = targetX;
+    *outY = targetY;
 }
 
 static void UpdateFlyoutWindowGeometry(int logicalH) {
     g_currentLogicalH = logicalH;
     if (!g_hWnd || !IsWindowVisible(g_hWnd)) return;
 
-    HMONITOR hMon = MonitorFromWindow(g_hWnd, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi = { sizeof(mi) };
-    GetMonitorInfoW(hMon, &mi);
-
     g_dpi = GetWindowDpi(g_hWnd);
     int w = S(VIEWPORT_W);
     int h = S(g_currentLogicalH);
-    int targetX = mi.rcWork.right - w - S(12);
-    int targetY = mi.rcWork.bottom - h - S(12);
+    int targetX = 0, targetY = 0;
+    CalculateFlyoutCoords(w, h, &targetX, &targetY);
 
     RECT rcCur = {0};
     GetWindowRect(g_hWnd, &rcCur);
-    if ((rcCur.bottom - rcCur.top) != h || (rcCur.right - rcCur.left) != w) {
+    if ((rcCur.bottom - rcCur.top) != h || (rcCur.right - rcCur.left) != w ||
+        rcCur.left != targetX || rcCur.top != targetY) {
         SetWindowPos(g_hWnd, HWND_TOPMOST, targetX, targetY, w, h, SWP_NOACTIVATE);
         if (g_wvHost) {
             g_wvHost->Resize();
@@ -318,7 +352,7 @@ static std::wstring GetNotificationHtml() {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    transform: translate3d(calc(100% + 16px), 0, 0);
+    transform: translate3d(0, 24px, 0);
     opacity: 0;
     will-change: transform, opacity;
   }
@@ -326,13 +360,13 @@ static std::wstring GetNotificationHtml() {
   .toast-card.enter {
     transform: translate3d(0, 0, 0);
     opacity: 1;
-    transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease-out;
+    transition: transform 0.28s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.2s ease-out;
   }
 
   .toast-card.exit {
-    transform: translate3d(calc(100% + 16px), 0, 0);
+    transform: translate3d(0, 20px, 0);
     opacity: 0;
-    transition: transform 0.24s cubic-bezier(0.4, 0, 1, 1), opacity 0.16s ease-in;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 1, 1), opacity 0.16s ease-in;
   }
 
   .fluent-icon {
@@ -499,16 +533,79 @@ static std::wstring GetNotificationHtml() {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+
+  /* Bottom Settings Action Bar */
+  .card-footer {
+    height: 38px;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    border-top: 1px solid var(--divider);
+    background: rgba(0, 0, 0, 0.12);
+    flex-shrink: 0;
+  }
+
+  body.light .card-footer {
+    background: rgba(0, 0, 0, 0.035);
+  }
+
+  .footer-btn {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+
+  .footer-btn:hover {
+    background: var(--track-bg);
+    color: var(--text-primary);
+    border-color: var(--border-card);
+  }
+
+  .footer-btn:active {
+    transform: scale(0.96);
+  }
+
+  .footer-icon {
+    font-size: 13.5px;
+  }
+
+  .footer-text {
+    font-weight: 500;
+  }
 </style>
 </head>
 <body>
   <div id="card" class="toast-card">
     <div id="devicesList" class="devices-scroll"></div>
+    <div class="card-footer">
+      <button id="footerSettingsBtn" class="footer-btn" title="打开设置">
+        <span class="fluent-icon footer-icon">&#xE713;</span>
+        <span class="footer-text">设置</span>
+      </button>
+    </div>
   </div>
 
 <script>
   const card = document.getElementById('card');
   const devicesList = document.getElementById('devicesList');
+  const footerSettingsBtn = document.getElementById('footerSettingsBtn');
+  if (footerSettingsBtn) {
+    footerSettingsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      postMsg('openSettings');
+    });
+  }
 
   let dismissTimer = null;
   let exitTimeout = null;
@@ -761,6 +858,9 @@ bool Init(HINSTANCE hInstance) {
                 if (g_hWnd) {
                     ShowWindow(g_hWnd, SW_HIDE);
                 }
+            } else if (msg == L"openSettings") {
+                Hide();
+                Settings::Show();
             }
         },
         []() {
@@ -797,18 +897,12 @@ void Show(HWND hOwnerWnd) {
     std::vector<Device::State> devs = Device::GetAllDevices();
     g_currentLogicalH = ComputeIdealLogicalHeight(devs);
 
-    POINT pt;
-    GetCursorPos(&pt);
-    HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi = { sizeof(mi) };
-    GetMonitorInfoW(hMon, &mi);
-
     g_dpi = GetWindowDpi(g_hWnd);
     int w = S(VIEWPORT_W);
     int h = S(g_currentLogicalH);
 
-    int targetX = mi.rcWork.right - w - S(12);
-    int targetY = mi.rcWork.bottom - h - S(12);
+    int targetX = 0, targetY = 0;
+    CalculateFlyoutCoords(w, h, &targetX, &targetY);
 
     g_isShowing = true;
     g_isClosing = false;

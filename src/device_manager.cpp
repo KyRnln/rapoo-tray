@@ -45,6 +45,17 @@ static const DEVPROPKEY PKEY_Win_BusReportedDesc = {
 };
 
 static CRITICAL_SECTION g_csState;
+static INIT_ONCE g_csInitOnce = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK InitCsCallback(PINIT_ONCE, PVOID, PVOID*) {
+    InitializeCriticalSection(&g_csState);
+    return TRUE;
+}
+
+static void EnsureCsInitialized() {
+    InitOnceExecuteOnce(&g_csInitOnce, InitCsCallback, NULL, NULL);
+}
+
 static std::vector<State> g_devices;
 static std::wstring g_pinnedDeviceId;
 static std::vector<std::wstring> g_deviceOrder;
@@ -1622,10 +1633,10 @@ static DWORD WINAPI HidWorkerThread(LPVOID) {
 // ----------------------------------------------------------------------------
 
 bool Start(HWND hNotifyWnd, StateCallback callback) {
+    EnsureCsInitialized();
     g_hNotifyWnd = hNotifyWnd;
     g_callback = callback;
 
-    InitializeCriticalSection(&g_csState);
     g_pinnedDeviceId = LoadRegistryString(L"PinnedDeviceId");
     g_deviceOrder = ParseDeviceOrderString(LoadRegistryString(L"DeviceOrder"));
     if (g_deviceOrder.empty() && !g_pinnedDeviceId.empty()) {
@@ -1650,7 +1661,6 @@ void Stop() {
     if (g_hStopEvent) { CloseHandle(g_hStopEvent); g_hStopEvent = NULL; }
     if (g_hDevChangeEvent) { CloseHandle(g_hDevChangeEvent); g_hDevChangeEvent = NULL; }
     if (g_hForceRefreshEvent) { CloseHandle(g_hForceRefreshEvent); g_hForceRefreshEvent = NULL; }
-    DeleteCriticalSection(&g_csState);
 }
 
 void NotifyDeviceChange() {
@@ -1674,6 +1684,7 @@ void ForceRefresh() {
 }
 
 State GetCurrentState() {
+    EnsureCsInitialized();
     EnterCriticalSection(&g_csState);
     State st = SelectPrimaryLocked();
     LeaveCriticalSection(&g_csState);
@@ -1681,6 +1692,7 @@ State GetCurrentState() {
 }
 
 std::vector<State> GetAllDevices() {
+    EnsureCsInitialized();
     EnterCriticalSection(&g_csState);
     std::vector<State> copy = g_devices;
     LeaveCriticalSection(&g_csState);
@@ -1688,6 +1700,7 @@ std::vector<State> GetAllDevices() {
 }
 
 std::wstring GetPinnedDeviceId() {
+    EnsureCsInitialized();
     EnterCriticalSection(&g_csState);
     std::wstring id = (!g_devices.empty()) ? g_devices[0].id : g_pinnedDeviceId;
     LeaveCriticalSection(&g_csState);
@@ -1702,6 +1715,7 @@ void SetPinnedDeviceId(const WCHAR* deviceId) {
 }
 
 void SetDeviceOrder(const std::vector<std::wstring>& orderedIds) {
+    EnsureCsInitialized();
     State primaryCopy = {};
     EnterCriticalSection(&g_csState);
 
@@ -1730,6 +1744,7 @@ void SetDeviceOrder(const std::vector<std::wstring>& orderedIds) {
 
 void SetDeviceCustomName(const WCHAR* deviceId, const WCHAR* customName) {
     if (!deviceId || !deviceId[0]) return;
+    EnsureCsInitialized();
     State primaryCopy = {};
     EnterCriticalSection(&g_csState);
 

@@ -12,6 +12,7 @@ extern "C" {
 #include "flyout_window.h"
 #include "settings_window.h"
 #include "game_mode.h"
+#include "taskbar_bar.h"
 
 static const UINT WM_APP_TRAYMSG = WM_APP + 1;
 static const UINT WM_APP_STATE_UPDATE = WM_APP + 2;
@@ -24,41 +25,19 @@ static HICON g_hCurrentTrayIcon = NULL;
 static void RefreshTrayUI(const Device::State& state) {
     if (!g_hMainWnd) return;
 
-    bool isDark = true;
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        DWORD val = 1, size = sizeof(DWORD), type = 0;
-        if (RegQueryValueExW(hKey, L"SystemUsesLightTheme", NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
-            isDark = (val == 0);
-        }
-        RegCloseKey(hKey);
-    }
-
-    int iconSize = GetSystemMetrics(SM_CXSMICON);
-    if (iconSize <= 0) iconSize = 16;
-
-    HICON hNewIcon = Tray::CreateBatteryIcon(state.battery, state.isCharging, state.isConnected, iconSize, isDark);
-    if (hNewIcon) {
-        g_nid.hIcon = hNewIcon;
-        Tray::UpdateTooltip(g_nid, state);
-        Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-
-        if (g_hCurrentTrayIcon) {
-            DestroyIcon(g_hCurrentTrayIcon);
-        }
-        g_hCurrentTrayIcon = hNewIcon;
-    }
+    // The system tray icon displays the project icon instead of battery icon.
+    // Dynamic battery and connection info are presented in the rich tooltip.
+    Tray::UpdateTooltip(g_nid, state);
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 
     Flyout::Invalidate();
     Settings::Invalidate();
+    TaskbarBar::UpdateState(state);
     Alert::CheckBattery(state);
 }
 
 static void OnDeviceStateChanged(const Device::State& state, DWORD changeMask) {
     if (!g_hMainWnd) return;
-
-    // Never auto-popup flyout cards during routine wireless reconnect, sleep wakeups, DPI, or polling updates.
-    // The Flyout panel is a user-initiated dashboard toggled via tray icon.
     PostMessageW(g_hMainWnd, WM_APP_STATE_UPDATE, 0, 0);
 }
 
@@ -66,15 +45,14 @@ static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
     if (msg == g_uTaskbarRestartMsg) {
         Shell_NotifyIconW(NIM_ADD, &g_nid);
         RefreshTrayUI(Device::GetCurrentState());
+        TaskbarBar::Invalidate();
         return 0;
     }
 
     switch (msg) {
         case WM_APP_TRAYMSG: {
             if (lParam == WM_LBUTTONUP) {
-                // Slide in Windows native style Notification Card from Right to Left
-                Flyout::Toggle(hWnd);
-                RefreshTrayUI(Device::GetCurrentState());
+                // 点击图标不再弹出电量面板 (User requirement: Click icon no longer pops up panel)
             } else if (lParam == WM_RBUTTONUP) {
                 SetForegroundWindow(hWnd);
                 Tray::ShowMenu(hWnd);
@@ -84,9 +62,6 @@ static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
         case WM_APP_STATE_UPDATE: {
             RefreshTrayUI(Device::GetCurrentState());
-            if (wParam == 1 && !GameMode::IsFullscreenOrGamingActive()) {
-                Flyout::Show(hWnd);
-            }
             return 0;
         }
 
@@ -94,6 +69,7 @@ static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED: {
             RefreshTrayUI(Device::GetCurrentState());
+            TaskbarBar::Invalidate();
             return 0;
         }
 
@@ -157,10 +133,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     g_uTaskbarRestartMsg = RegisterWindowMessageW(L"TaskbarCreated");
 
-    // Initialize Flyout Notification, WinUI Settings, and Low-Battery Alert Windows
+    // Start background HID Device Manager
+    Device::Start(g_hMainWnd, OnDeviceStateChanged);
+
+    // Initialize Flyout Notification, WinUI Settings, Low-Battery Alert, and Taskbar Bar Windows
     Flyout::Init(hInstance);
     Settings::Init(hInstance, g_hMainWnd);
     Alert::Init(hInstance);
+    TaskbarBar::Init(hInstance, g_hMainWnd);
 
     // Register PnP Device notifications
     DEV_BROADCAST_DEVICEINTERFACE_W dbFilter = {0};
@@ -169,18 +149,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     HidD_GetHidGuid(&dbFilter.dbcc_classguid);
     HDEVNOTIFY hDevNotify = RegisterDeviceNotificationW(g_hMainWnd, &dbFilter, DEVICE_NOTIFY_WINDOW_HANDLE | 0x00000004);
 
-    // Register Notify Icon
+    // Register Notify Icon with sharpest project icon at system notification resolution
+    int smIcon = GetSystemMetrics(SM_CXSMICON);
+    if (smIcon <= 0) smIcon = 16;
+    HICON hAppIcon = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON, smIcon, smIcon, LR_DEFAULTCOLOR);
+    if (!hAppIcon) hAppIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
+
     g_nid.cbSize = sizeof(NOTIFYICONDATAW);
     g_nid.hWnd = g_hMainWnd;
     g_nid.uID = 1;
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     g_nid.uCallbackMessage = WM_APP_TRAYMSG;
-    g_nid.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
+    g_nid.hIcon = hAppIcon;
     StringCchCopyW(g_nid.szTip, ARRAYSIZE(g_nid.szTip), L"外设电量监控 (正在连接...)");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
-
-    // Start background HID Device Manager
-    Device::Start(g_hMainWnd, OnDeviceStateChanged);
 
     // Run message pump
     MSG msg;
@@ -195,6 +177,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         hDevNotify = NULL;
     }
     Device::Stop();
+    TaskbarBar::Cleanup();
     Settings::Cleanup();
     Flyout::Cleanup();
     Alert::Cleanup();
