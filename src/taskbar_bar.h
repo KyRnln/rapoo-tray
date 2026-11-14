@@ -85,4 +85,8 @@ void Invalidate();
 // Get HWND of the taskbar bar window
 HWND GetWindowHandle();
 
+typedef void (*BarClickCallback)();
+typedef void (*BarRightClickCallback)(int x, int y);
+void SetClickCallbacks(BarClickCallback onClick, BarRightClickCallback onRightClick);
+
 } // namespace TaskbarBar

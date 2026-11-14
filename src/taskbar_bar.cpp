@@ -1,6 +1,4 @@
 #include "taskbar_bar.h"
-#include "flyout_window.h"
-#include "tray_menu.h"
 #include "game_mode.h"
 #include <windows.h>
 #include <windowsx.h>
@@ -35,6 +33,8 @@ static HWND g_hWnd = NULL;
 static HWND g_hMainAppWnd = NULL;
 static HINSTANCE g_hInst = NULL;
 static ULONG_PTR g_gdiplusToken = 0;
+static BarClickCallback s_barClickCallback = nullptr;
+static BarRightClickCallback s_barRightClickCallback = nullptr;
 
 static bool s_enabled = true;
 static int s_position = POS_RIGHT; // 0 = left, 1 = center, 2 = right
@@ -955,17 +955,18 @@ static LRESULT CALLBACK TaskbarBarWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
 
         case WM_LBUTTONUP: {
             // Left click: Toggle the Windows 11 Native Notification Card (Flyout)
-            if (g_hMainAppWnd && IsWindow(g_hMainAppWnd)) {
-                Flyout::Toggle(g_hMainAppWnd);
+            if (s_barClickCallback) {
+                s_barClickCallback();
             }
             return 0;
         }
 
         case WM_RBUTTONUP: {
             // Right click: Open the acrylic tray context menu
-            if (g_hMainAppWnd && IsWindow(g_hMainAppWnd)) {
-                SetForegroundWindow(g_hMainAppWnd);
-                Tray::ShowMenu(g_hMainAppWnd);
+            if (s_barRightClickCallback) {
+                POINT pt;
+                GetCursorPos(&pt);
+                s_barRightClickCallback(pt.x, pt.y);
             }
             return 0;
         }
@@ -1226,6 +1227,11 @@ void Invalidate() {
 
 HWND GetWindowHandle() {
     return g_hWnd;
+}
+
+void SetClickCallbacks(BarClickCallback onClick, BarRightClickCallback onRightClick) {
+    s_barClickCallback = onClick;
+    s_barRightClickCallback = onRightClick;
 }
 
 } // namespace TaskbarBar

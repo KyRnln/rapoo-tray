@@ -5,10 +5,10 @@
   <p><sub>雷柏（Rapoo）全功能控制 · 多品牌电量聚合 · Windows 11 原生 Fluent 界面</sub></p>
 
   <p>
-    <a href="https://github.com/KyRnln/rapoo-tray/releases"><img src="https://img.shields.io/badge/Release-v1.4.0-blue?style=flat-square" alt="Release" /></a>
+    <a href="https://github.com/KyRnln/rapoo-tray/releases"><img src="https://img.shields.io/badge/Release-v2.0.0-blue?style=flat-square" alt="Release" /></a>
     <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?style=flat-square&logo=windows" alt="Platform" />
-    <img src="https://img.shields.io/badge/Language-C%2B%2B17%20%2F%20Win32-00599C?style=flat-square&logo=c%2B%2B" alt="Language" />
-    <img src="https://img.shields.io/badge/UI-Windows%2011%20Fluent%20%2F%20WebView2-0067C0?style=flat-square" alt="UI" />
+    <img src="https://img.shields.io/badge/Framework-WinUI%203%20%2F%20Windows%20App%20SDK-0078D4?style=flat-square&logo=windows" alt="Framework" />
+    <img src="https://img.shields.io/badge/Language-.NET%208%20%2B%20C%2B%2B17-512BD4?style=flat-square&logo=dotnet" alt="Language" />
     <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
   </p>
 </div>
@@ -17,25 +17,35 @@
 
 ## 💡 项目简介
 
-**rapoo-tray** 是一款面向游戏外设用户的轻量化状态监控工具。基于 C++17 与 Win32 API 编写，不依赖 .NET / Electron 等重型框架，常驻内存极低。程序以系统托盘独立运行，或作为插件集成至 [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor)。
+**rapoo-tray** 是一款面向游戏外设用户的现代化、轻量级状态与电量监控工具。采用 **WinUI 3 (Windows App SDK) + 原生 C++ HID 遥测核心** 双架构：
 
-- 对**雷柏（Rapoo）二代 Nordic 架构**外设提供**完整功能**：电量、DPI、回报率读取，以及回报率 / 休眠时间等硬件参数下发。
-- 对**罗技、雷蛇、西伯利亚、Keychron**等**多品牌外设**提供标准化电量聚合（HID++ 2.0、标准 HID 电池、蓝牙 GATT）。
-- 交互界面采用 **WebView2 + Windows 11 Fluent 设计语言**：原生通知卡片悬浮窗与独立设置窗口。
+- **100% 官方 Windows 11 云母 (Mica) 与亚克力 (Desktop Acrylic) 材质**：彻底告别白底、白框与白屏闪烁，与 Windows 11 原生控制中心、音量浮窗体验完全一致。
+- **任务栏常驻电量指示**：直接嵌入 Windows 11 任务栏，实时显示当前置顶外设的名称、电量百分比、进度条与设备分类图标。
+- **高度个性化定制**：独立个性化设置面板，支持调节常驻进度条宽度、停靠位置、设备图标尺寸、图标上下偏移、文本字号、间距及配色模式（跟随系统主题 / 纯黑 / 强调色）。
+- **多设备智能聚合**：支持雷柏（Rapoo）VT/MT 全系列、罗技、雷蛇、Keychron、黑峡谷等无线/有线设备，实时展现 DPI、回报率与充电状态。
 
 ---
 
-## 🚀 v1.4.0 新版本特性
+## 🚀 v2.0.0 WinUI 3 架构全新特性
 
-- **全新 Windows 11 通知卡片悬浮窗（WebView2）**：
-  - 左键单击托盘图标，右下角滑入原生通知卡片，实时展示全部设备的电量、连接模式、DPI 与回报率。
-  - 多设备自动堆叠、整卡滑入 / 滑出动画、鼠标悬停暂停自动收起、跟随系统深浅色与主题强调色。
-  - 取代旧版固定宽框 OSD，卡片高度按内容动态计算。
-- **全新独立设置窗口（WinUI 3 / WebView2）**：
-  - 右键菜单进入，Windows 11 Mica 材质背景、NavigationView 导航布局、卡片化级联入场动画。
-  - **设备重命名**：双击设备名即可自定义显示名称（留空恢复默认）。
-  - **拖动排序 / 置顶**：按住拖拽手柄调整多设备顺序，首位设备作为托盘电池主显示。
-  - **开机自启动**开关与设备实时遥测面板。
+- **WinUI 3 官方现代架构**：
+  - 彻底重构前端展示层为 **Windows App SDK (WinUI 3)**，原生合成管线直连 DWM，完美渲染官方 Mica 与 Acrylic 效果。
+  - 弹出卡片自带优雅圆角（`CornerRadius="8"`）与半透明磨砂玻璃质感。
+  - 失去焦点自动淡出收起，完美防误触。
+- **任务栏常驻进度条交互优化**：
+  - **点击常驻进度条**：自任务栏进度条位置**由下往上平滑弹出**设备列表卡片（与状态栏保持精细间距），不再从通知区域生硬弹出。
+  - **底部设置入口**：卡片底部新增常驻“设置”按钮，一键直达控制面板。
+  - **任务栏托盘图标**：显示项目专属图标，点击不再弹出面板，右键唤起设置与退出。
+- **全新独立个性化设置页面**：
+  - **宽度调节**：100 ~ 280 像素自由拉动，适配不同长短的设备名称。
+  - **停靠位置**：支持靠左侧（小组件侧）、居中空白区、靠右侧（托盘侧）。
+  - **设备图标尺寸**：12 ~ 28 像素微调。
+  - **设备图标上下偏移**：-8 ~ +8 像素精细对齐。
+  - **字体文本大小**：9 ~ 16 磅字体调节。
+  - **文字与进度条上下间距**：0 ~ 8 像素调节。
+  - **色彩方案**：图标与进度条均支持“跟随系统主题（默认）”、“纯黑色”及“系统强调色”。
+- **前后前台切换防闪烁**：
+  - 重构任务栏绘制与消息处理，前台游戏或应用切换时任务栏进度条无感保活、永不白闪。
 - **多设备并行监控**：同时识别并展示多只鼠标 / 键盘 / 耳机 / 手柄 / 底座。
 - **多品牌电量聚合**：支持罗技 HID++ 2.0、雷蛇专有 91 字节 Feature Report 协议、西伯利亚耳机、ATK / VXE、微软、索尼、苹果、Keychron、Pulsar、Lamzu 及通用蓝牙 BLE 外设的电量读取。
 - **雷蛇（Razer）专有协议与休眠保活**：针对 2.4G HyperSpeed 无线鼠标（如 Orochi V2、Viper、DeathAdder 等）实现底层 91 字节指令直读，并在接收器闲置休眠（状态码 `0x04`）时持久保留缓存电量与状态，永不闪烁丢失，唤醒后毫秒级恢复。

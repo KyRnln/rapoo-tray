@@ -4,8 +4,8 @@ cd /d "%~dp0"
 
 if not exist bin mkdir bin
 
+taskkill /F /IM RapooTray.exe >nul 2>nul
 taskkill /F /IM rapoo-tray.exe >nul 2>nul
-if exist bin\rapoo-tray.exe del /F /Q bin\rapoo-tray.exe >nul 2>nul
 
 where g++ >nul 2>nul
 if %ERRORLEVEL% neq 0 (
@@ -14,40 +14,34 @@ if %ERRORLEVEL% neq 0 (
     )
 )
 
-echo ========================================================
-echo   Building rapoo-tray (Release Standalone Executable)
-echo ========================================================
-
-where g++ >nul 2>nul
-if %ERRORLEVEL% equ 0 (
-    echo [Toolchain] Using MinGW GCC/G++ ...
-    windres --codepage 65001 -I res -i res\app.rc -o bin\app.o
-    g++ -O3 -mwindows -municode -s -static src\main.cpp src\rapoo_protocol.cpp src\device_manager.cpp src\osd_window.cpp src\tray_menu.cpp src\alert_window.cpp src\flyout_window.cpp src\settings_window.cpp src\taskbar_bar.cpp bin\app.o -lsetupapi -lhid -luser32 -lgdi32 -lgdiplus -lshell32 -ladvapi32 -lole32 -luuid -luxtheme -ldwmapi -o bin\rapoo-tray.exe
-    if exist bin\app.o del bin\app.o
-    goto done
+where dotnet >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    if exist "%LOCALAPPDATA%\Microsoft\dotnet" (
+        set "PATH=%LOCALAPPDATA%\Microsoft\dotnet;%PATH%"
+    )
 )
 
-where cl >nul 2>nul
-if %ERRORLEVEL% equ 0 (
-    echo [Toolchain] Using MSVC CL ...
-    rc /c 65001 /fo bin\app.res res\app.rc
-    cl /nologo /O2 /MT /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN src\main.cpp src\rapoo_protocol.cpp src\device_manager.cpp src\osd_window.cpp src\tray_menu.cpp src\alert_window.cpp src\flyout_window.cpp src\settings_window.cpp src\taskbar_bar.cpp bin\app.res /Fe:bin\rapoo-tray.exe /link /SUBSYSTEM:WINDOWS setupapi.lib hid.lib user32.lib gdi32.lib gdiplus.lib shell32.lib advapi32.lib ole32.lib uxtheme.lib dwmapi.lib
-    if exist bin\app.res del bin\app.res
-    if exist *.obj del *.obj
-    goto done
-)
+echo ========================================================
+echo   Building Rapoo Tray (WinUI 3 + Native C++ HID Core)
+echo ========================================================
 
-echo [ERROR] Neither g++ nor cl.exe was found in PATH.
-exit /b 1
-
-:done
-if exist bin\rapoo-tray.exe (
-    echo.
-    echo [SUCCESS] Build completed successfully: bin\rapoo-tray.exe
-    echo File size:
-    dir bin\rapoo-tray.exe | findstr rapoo-tray.exe
-) else (
-    echo.
-    echo [ERROR] Compilation failed.
+echo [1/2] Compiling Native C++ Hardware Telemetry Core (rapoo_core.dll) ...
+g++ -shared -o bin\rapoo_core.dll src\rapoo_core.cpp src\device_manager.cpp src\rapoo_protocol.cpp src\taskbar_bar.cpp -O2 -std=c++17 -lhid -lsetupapi -lgdiplus -ldwmapi -lcomctl32 -luser32 -lgdi32 -ladvapi32 -static-libgcc -static-libstdc++
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Failed to compile rapoo_core.dll
     exit /b 1
 )
+
+echo [2/2] Compiling WinUI 3 Application (RapooTray.exe) ...
+cd RapooTray
+dotnet build -c Release -r win-x64
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Failed to build WinUI 3 project.
+    cd ..
+    exit /b 1
+)
+cd ..
+
+echo.
+echo [SUCCESS] Build completed successfully!
+echo Output folder: RapooTray\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\
