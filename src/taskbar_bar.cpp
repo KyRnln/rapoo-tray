@@ -26,6 +26,7 @@ static const WCHAR* VAL_ICON_SIZE = L"TaskbarBarIconSize";
 static const WCHAR* VAL_ICON_COLOR = L"TaskbarBarIconColor";
 static const WCHAR* VAL_ICON_ALIGN = L"TaskbarBarIconAlign";
 static const WCHAR* VAL_BAR_SPACING = L"TaskbarBarSpacing";
+static const WCHAR* VAL_BAR_COLOR = L"TaskbarBarColor";
 static const UINT_PTR TIMER_UPDATE_POS = 2001;
 
 static HWND g_hWnd = NULL;
@@ -40,10 +41,16 @@ static int s_barSpacing = 2;       // Base 96-DPI spacing between text and progr
 static int s_iconSize = 18;        // Base 96-DPI icon size (12 ~ 28, default 18)
 static int s_iconColorMode = ICON_COLOR_BLACK; // 0 = Black (default), 1 = Accent, 2 = Theme auto
 static int s_iconAlign = ICON_ALIGN_LEFT;      // 0 = Left (default), 1 = Right
+static int s_barColorMode = BAR_COLOR_STATUS;  // 0 = Smart Status (default), 1 = Black, 2 = Accent, 3 = Theme auto
 static bool s_isHover = false;
 static bool s_inGameMode = false;
 static Device::State s_currentState = {};
 static int s_lastDpi = 96;
+static int s_lastPosX = -9999;
+static int s_lastPosY = -9999;
+static int s_lastPillW = 0;
+static int s_lastPillH = 0;
+static bool s_lastDark = true;
 
 static inline int ScaleDpi(int val, int dpi) {
     return MulDiv(val, dpi, 96);
@@ -262,6 +269,29 @@ static void SaveBarSpacingRegistry(int spacing) {
     }
 }
 
+static int LoadBarColorRegistry() {
+    HKEY hKey;
+    DWORD val = BAR_COLOR_STATUS;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD type = 0, size = sizeof(DWORD);
+        if (RegQueryValueExW(hKey, VAL_BAR_COLOR, NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            if (val <= 3) return (int)val;
+        }
+        RegCloseKey(hKey);
+    }
+    return BAR_COLOR_STATUS;
+}
+
+static void SaveBarColorRegistry(int mode) {
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_SUBKEY, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        DWORD val = (DWORD)mode;
+        RegSetValueExW(hKey, VAL_BAR_COLOR, 0, REG_DWORD, (const BYTE*)&val, sizeof(DWORD));
+        RegCloseKey(hKey);
+    }
+}
+
 // Add rounded rectangle to GDI+ path
 static void AddRoundRect(Gdiplus::GraphicsPath& path, Gdiplus::RectF bounds, float radius) {
     float diameter = radius * 2.0f;
@@ -308,8 +338,11 @@ static Gdiplus::Font* CreateTextFont(float sizePx, Gdiplus::FontStyle style) {
     return new Gdiplus::Font(L"Microsoft YaHei UI", sizePx, style, Gdiplus::UnitPixel);
 }
 
-// Detect full-screen D3D games or borderless full-screen games, without suppressing for Quiet Hours / Focus Assist
+// Detect full-screen D3D games or borderless full-screen games, avoiding false positives on shell overlays/task switching
 static bool IsFullscreenGameActive() {
+    HWND hTaskbar = FindWindowW(L"Shell_TrayWnd", NULL);
+
+    // 1. Check Windows Shell User Notification State for full-screen 3D games
     HMODULE hShell = GetModuleHandleW(L"shell32.dll");
     if (!hShell) hShell = LoadLibraryW(L"shell32.dll");
     if (hShell) {
@@ -334,26 +367,64 @@ static bool IsFullscreenGameActive() {
         }
     }
 
+    // 2. Fallback: Borderless fullscreen detection
     HWND hFore = GetForegroundWindow();
-    if (hFore && hFore != GetDesktopWindow() && hFore != GetShellWindow()) {
-        WCHAR className[64] = {0};
-        GetClassNameW(hFore, className, ARRAYSIZE(className));
-        if (_wcsicmp(className, L"Progman") != 0 &&
-            _wcsicmp(className, L"WorkerW") != 0 &&
-            _wcsicmp(className, L"Shell_TrayWnd") != 0 &&
-            _wcsicmp(className, L"Shell_SecondaryTrayWnd") != 0) {
-            RECT rcApp = {0};
-            if (GetWindowRect(hFore, &rcApp)) {
-                HMONITOR hMon = MonitorFromWindow(hFore, MONITOR_DEFAULTTOPRIMARY);
-                MONITORINFO mi = { sizeof(mi) };
-                if (GetMonitorInfoW(hMon, &mi)) {
-                    if (rcApp.left <= mi.rcMonitor.left &&
-                        rcApp.top <= mi.rcMonitor.top &&
-                        rcApp.right >= mi.rcMonitor.right &&
-                        rcApp.bottom >= mi.rcMonitor.bottom) {
-                        return true;
-                    }
-                }
+    if (!hFore || hFore == GetDesktopWindow() || hFore == GetShellWindow() || hFore == g_hWnd || hFore == hTaskbar) {
+        return false;
+    }
+
+    // Filter out known Windows Shell windows, Start Menu, Alt-Tab switcher, Task View, etc.
+    WCHAR className[128] = {0};
+    GetClassNameW(hFore, className, ARRAYSIZE(className));
+    if (_wcsicmp(className, L"Progman") == 0 ||
+        _wcsicmp(className, L"WorkerW") == 0 ||
+        _wcsicmp(className, L"Shell_TrayWnd") == 0 ||
+        _wcsicmp(className, L"Shell_SecondaryTrayWnd") == 0 ||
+        _wcsicmp(className, L"XamlExplorerHostIslandWindow") == 0 ||
+        _wcsicmp(className, L"MultitaskingViewFrame") == 0 ||
+        _wcsicmp(className, L"Windows.UI.Core.CoreWindow") == 0 ||
+        _wcsicmp(className, L"ForegroundStaging") == 0 ||
+        _wcsicmp(className, L"TopLevelWindowForOverflowXamlIsland") == 0) {
+        return false;
+    }
+
+    // Check process name of foreground window: ignore Windows Shell processes
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hFore, &pid);
+    if (pid == 0 || pid == GetCurrentProcessId()) {
+        return false;
+    }
+
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (hProc) {
+        WCHAR procPath[MAX_PATH] = {0};
+        DWORD sz = MAX_PATH;
+        if (QueryFullProcessImageNameW(hProc, 0, procPath, &sz)) {
+            const WCHAR* pSlash = wcsrchr(procPath, L'\\');
+            const WCHAR* exe = pSlash ? (pSlash + 1) : procPath;
+            if (_wcsicmp(exe, L"explorer.exe") == 0 ||
+                _wcsicmp(exe, L"SearchHost.exe") == 0 ||
+                _wcsicmp(exe, L"SearchApp.exe") == 0 ||
+                _wcsicmp(exe, L"ShellExperienceHost.exe") == 0 ||
+                _wcsicmp(exe, L"StartMenuExperienceHost.exe") == 0 ||
+                _wcsicmp(exe, L"Taskmgr.exe") == 0) {
+                CloseHandle(hProc);
+                return false;
+            }
+        }
+        CloseHandle(hProc);
+    }
+
+    RECT rcApp = {0};
+    if (GetWindowRect(hFore, &rcApp)) {
+        HMONITOR hMon = MonitorFromWindow(hFore, MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO mi = { sizeof(mi) };
+        if (GetMonitorInfoW(hMon, &mi)) {
+            if (rcApp.left <= mi.rcMonitor.left &&
+                rcApp.top <= mi.rcMonitor.top &&
+                rcApp.right >= mi.rcMonitor.right &&
+                rcApp.bottom >= mi.rcMonitor.bottom) {
+                return true;
             }
         }
     }
@@ -591,14 +662,28 @@ static void RepaintBar() {
         if (battery > 100) battery = 100;
 
         Gdiplus::Color barColor(255, aR, aG, aB);
-        if (!st.isConnected) {
-            barColor = Gdiplus::Color(140, 145, 155, 168);
-        } else if (st.isCharging) {
-            barColor = Gdiplus::Color(255, 34, 197, 94); // #22C55E Emerald
-        } else if (battery <= 20) {
-            barColor = Gdiplus::Color(255, 239, 68, 68); // #EF4444 Red
-        } else if (battery <= 35) {
-            barColor = Gdiplus::Color(255, 245, 158, 11); // #F59E0B Amber
+        if (s_barColorMode == BAR_COLOR_BLACK) {
+            barColor = Gdiplus::Color(255, 0, 0, 0);
+        } else if (s_barColorMode == BAR_COLOR_ACCENT) {
+            barColor = Gdiplus::Color(255, aR, aG, aB);
+        } else if (s_barColorMode == BAR_COLOR_THEME) {
+            barColor = isDark ? Gdiplus::Color(255, 240, 244, 248) : Gdiplus::Color(255, 28, 33, 40);
+        } else {
+            // BAR_COLOR_STATUS (0 = default smart status)
+            if (!st.isConnected) {
+                barColor = Gdiplus::Color(140, 145, 155, 168);
+            } else if (st.isCharging) {
+                barColor = Gdiplus::Color(255, 34, 197, 94); // #22C55E Emerald
+            } else if (battery <= 20) {
+                barColor = Gdiplus::Color(255, 239, 68, 68); // #EF4444 Red
+            } else if (battery <= 35) {
+                barColor = Gdiplus::Color(255, 245, 158, 11); // #F59E0B Amber
+            } else {
+                barColor = Gdiplus::Color(255, aR, aG, aB);
+            }
+        }
+        if (!st.isConnected && s_barColorMode != BAR_COLOR_STATUS) {
+            barColor = Gdiplus::Color(120, barColor.GetR(), barColor.GetG(), barColor.GetB());
         }
 
         // 3. Device Category Icon (Mouse, Keyboard, Headset) & Layout
@@ -742,8 +827,15 @@ static void RepaintBar() {
 
     UpdateLayeredWindow(g_hWnd, hdcScreen, &ptDst, &sizeWnd, memDC, &ptSrc, 0, &bf, ULW_ALPHA);
 
-    SetWindowPos(g_hWnd, HWND_TOPMOST, posX, posY, pillW, pillH,
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    s_lastPosX = posX;
+    s_lastPosY = posY;
+    s_lastPillW = pillW;
+    s_lastPillH = pillH;
+    s_lastDark = isDark;
+
+    if (!IsWindowVisible(g_hWnd)) {
+        ShowWindow(g_hWnd, SW_SHOWNOACTIVATE);
+    }
 
     SelectObject(memDC, oldBmp);
     DeleteObject(hbm);
@@ -753,6 +845,16 @@ static void RepaintBar() {
 
 static LRESULT CALLBACK TaskbarBarWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        case WM_ERASEBKGND:
+            return 1;
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            BeginPaint(hWnd, &ps);
+            EndPaint(hWnd, &ps);
+            return 0;
+        }
+
         case WM_CREATE: {
             SetTimer(hWnd, TIMER_UPDATE_POS, 1000, NULL);
             return 0;
@@ -769,7 +871,16 @@ static LRESULT CALLBACK TaskbarBarWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                         RepaintBar();
                     }
                 } else if (!s_inGameMode && s_enabled) {
-                    RepaintBar();
+                    // Only repaint if geometry (due to taskbar cluster movement) or theme changed
+                    int dpi = GetCurrentDpi(hWnd);
+                    int pillW = ScaleDpi(s_width, dpi);
+                    int pillH = ScaleDpi(32, dpi);
+                    int curX = 0, curY = 0;
+                    CalculateTaskbarPosition(pillW, pillH, dpi, &curX, &curY);
+                    bool dark = IsSystemDarkTheme();
+                    if (curX != s_lastPosX || curY != s_lastPosY || pillW != s_lastPillW || pillH != s_lastPillH || dark != s_lastDark) {
+                        RepaintBar();
+                    }
                 }
             }
             return 0;
@@ -849,6 +960,9 @@ bool Init(HINSTANCE hInstance, HWND hMainWnd) {
     s_iconSize = LoadIconSizeRegistry();
     s_iconColorMode = LoadIconColorRegistry();
     s_iconAlign = LoadIconAlignRegistry();
+    s_barColorMode = LoadBarColorRegistry();
+
+    HWND hTaskbar = FindWindowW(L"Shell_TrayWnd", NULL);
 
     WNDCLASSEXW wc = {0};
     wc.cbSize = sizeof(wc);
@@ -864,7 +978,7 @@ bool Init(HINSTANCE hInstance, HWND hMainWnd) {
         L"RapooTaskbarBar",
         WS_POPUP,
         0, 0, 140, 32,
-        NULL, NULL, hInstance, NULL
+        hTaskbar, NULL, hInstance, NULL
     );
 
     if (!g_hWnd) {
@@ -982,6 +1096,19 @@ void SetIconColorMode(int mode) {
 
 int GetIconColorMode() {
     return s_iconColorMode;
+}
+
+void SetBarColorMode(int mode) {
+    if (mode < BAR_COLOR_STATUS || mode > BAR_COLOR_THEME) mode = BAR_COLOR_STATUS;
+    s_barColorMode = mode;
+    SaveBarColorRegistry(s_barColorMode);
+    if (g_hWnd && IsWindow(g_hWnd) && s_enabled && !s_inGameMode) {
+        RepaintBar();
+    }
+}
+
+int GetBarColorMode() {
+    return s_barColorMode;
 }
 
 void SetIconAlign(int align) {

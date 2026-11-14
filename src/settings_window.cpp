@@ -150,6 +150,7 @@ static void PushStateToWebView() {
     json += L",taskbarWidth:" + std::to_wstring(TaskbarBar::GetWidth());
     json += L",taskbarIconSize:" + std::to_wstring(TaskbarBar::GetIconSize());
     json += L",taskbarIconColor:" + std::to_wstring(TaskbarBar::GetIconColorMode());
+    json += L",taskbarBarColor:" + std::to_wstring(TaskbarBar::GetBarColorMode());
     json += L",taskbarIconAlign:" + std::to_wstring(TaskbarBar::GetIconAlign());
     json += L",taskbarSpacing:" + std::to_wstring(TaskbarBar::GetBarSpacing());
     json += L",accent:\"" + accent + L"\"";
@@ -1045,7 +1046,25 @@ static std::wstring GetSettingsHtml() {
           </div>
         </div>
 
-        <div id="taskbarIconAlignCard" class="settings-card" style="--card-idx:5">
+        <div id="taskbarBarColorCard" class="settings-card" style="--card-idx:5">
+          <div class="card-left">
+            <span class="fluent-icon card-icon">&#xE790;</span>
+            <div class="card-titles">
+              <div class="card-title">进度条电量颜色</div>
+              <div class="card-desc">电量进度条与百分比颜色，可选择智能状态色或跟随个性化</div>
+            </div>
+          </div>
+          <div class="card-right">
+            <div class="segmented-pill">
+              <button id="barColStatusBtn" class="seg-btn active">智能状态 (默认)</button>
+              <button id="barColBlackBtn" class="seg-btn">黑色</button>
+              <button id="barColAccentBtn" class="seg-btn">强调色</button>
+              <button id="barColThemeBtn" class="seg-btn">跟随主题</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="taskbarIconAlignCard" class="settings-card" style="--card-idx:6">
           <div class="card-left">
             <span class="fluent-icon card-icon">&#xE8AB;</span>
             <div class="card-titles">
@@ -1061,7 +1080,7 @@ static std::wstring GetSettingsHtml() {
           </div>
         </div>
 
-        <div id="taskbarSpacingCard" class="settings-card" style="--card-idx:6">
+        <div id="taskbarSpacingCard" class="settings-card" style="--card-idx:7">
           <div class="card-left">
             <span class="fluent-icon card-icon">&#xE74B;</span>
             <div class="card-titles">
@@ -1238,6 +1257,19 @@ static std::wstring GetSettingsHtml() {
   });
   document.getElementById('iconColThemeBtn').addEventListener('click', () => {
     postMsg('setTaskbarIconColor:2');
+  });
+
+  document.getElementById('barColStatusBtn').addEventListener('click', () => {
+    postMsg('setTaskbarBarColor:0');
+  });
+  document.getElementById('barColBlackBtn').addEventListener('click', () => {
+    postMsg('setTaskbarBarColor:1');
+  });
+  document.getElementById('barColAccentBtn').addEventListener('click', () => {
+    postMsg('setTaskbarBarColor:2');
+  });
+  document.getElementById('barColThemeBtn').addEventListener('click', () => {
+    postMsg('setTaskbarBarColor:3');
   });
 
   document.getElementById('iconAlignLeftBtn').addEventListener('click', () => {
@@ -1580,6 +1612,7 @@ static std::wstring GetSettingsHtml() {
     const widthCard = document.getElementById('taskbarWidthCard');
     const iconSizeCard = document.getElementById('taskbarIconSizeCard');
     const iconColorCard = document.getElementById('taskbarIconColorCard');
+    const barColorCard = document.getElementById('taskbarBarColorCard');
     const iconAlignCard = document.getElementById('taskbarIconAlignCard');
     const spacingCard = document.getElementById('taskbarSpacingCard');
     const tbActive = !!payload.taskbarBar;
@@ -1587,6 +1620,7 @@ static std::wstring GetSettingsHtml() {
     if (widthCard) widthCard.style.display = tbActive ? 'flex' : 'none';
     if (iconSizeCard) iconSizeCard.style.display = tbActive ? 'flex' : 'none';
     if (iconColorCard) iconColorCard.style.display = tbActive ? 'flex' : 'none';
+    if (barColorCard) barColorCard.style.display = tbActive ? 'flex' : 'none';
     if (iconAlignCard) iconAlignCard.style.display = tbActive ? 'flex' : 'none';
     if (spacingCard) spacingCard.style.display = tbActive ? 'flex' : 'none';
 
@@ -1619,6 +1653,18 @@ static std::wstring GetSettingsHtml() {
       colB.classList.toggle('active', iconCol === 0);
       colA.classList.toggle('active', iconCol === 1);
       colT.classList.toggle('active', iconCol === 2);
+    }
+
+    const barCol = (typeof payload.taskbarBarColor === 'number') ? payload.taskbarBarColor : 0;
+    const bColS = document.getElementById('barColStatusBtn');
+    const bColB = document.getElementById('barColBlackBtn');
+    const bColA = document.getElementById('barColAccentBtn');
+    const bColT = document.getElementById('barColThemeBtn');
+    if (bColS && bColB && bColA && bColT) {
+      bColS.classList.toggle('active', barCol === 0);
+      bColB.classList.toggle('active', barCol === 1);
+      bColA.classList.toggle('active', barCol === 2);
+      bColT.classList.toggle('active', barCol === 3);
     }
 
     const iconAlign = (typeof payload.taskbarIconAlign === 'number') ? payload.taskbarIconAlign : 0;
@@ -1758,6 +1804,10 @@ static void EnsureWindowCreated() {
             } else if (msg.rfind(L"setTaskbarIconColor:", 0) == 0) {
                 int mode = _wtoi(msg.substr(20).c_str());
                 TaskbarBar::SetIconColorMode(mode);
+                PushStateToWebView();
+            } else if (msg.rfind(L"setTaskbarBarColor:", 0) == 0) {
+                int mode = _wtoi(msg.substr(19).c_str());
+                TaskbarBar::SetBarColorMode(mode);
                 PushStateToWebView();
             } else if (msg.rfind(L"setTaskbarIconAlign:", 0) == 0) {
                 int align = _wtoi(msg.substr(20).c_str());

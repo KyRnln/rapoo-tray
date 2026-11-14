@@ -47,6 +47,16 @@ enum IconColorMode {
 void SetIconColorMode(int mode);
 int GetIconColorMode();
 
+// Battery Progress Bar color mode (0 = Smart Status [default], 1 = Black, 2 = Accent, 3 = Theme auto)
+enum BarColorMode {
+    BAR_COLOR_STATUS = 0,
+    BAR_COLOR_BLACK = 1,
+    BAR_COLOR_ACCENT = 2,
+    BAR_COLOR_THEME = 3
+};
+void SetBarColorMode(int mode);
+int GetBarColorMode();
+
 // Device Category Icon alignment (0 = Left [default], 1 = Right)
 enum IconAlign {
     ICON_ALIGN_LEFT = 0,
