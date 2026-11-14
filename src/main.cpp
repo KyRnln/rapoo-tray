@@ -103,6 +103,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         return 0;
     }
 
+    // Ensure WebView2 engine defaults to fully transparent background across all windows
+    // (Prevents Chromium white flash and eliminates opaque white canvas blocking Windows 11 Mica)
+    SetEnvironmentVariableW(L"WEBVIEW2_DEFAULT_BACKGROUND_COLOR", L"00000000");
+    SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", L"--disable-features=msWebView2DefaultBackgroundWhite");
+
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     Tray::InitTheme();
 

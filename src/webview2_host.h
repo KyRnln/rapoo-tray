@@ -362,6 +362,8 @@ private:
         }
 
         m_creating = true;
+        SetEnvironmentVariableW(L"WEBVIEW2_DEFAULT_BACKGROUND_COLOR", L"00000000");
+        SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", L"--disable-features=msWebView2DefaultBackgroundWhite");
         std::wstring userData = GetUserDataFolderPath();
         HRESULT hr = fnCreate(true, 0 /* installed */, userData.c_str(), nullptr, this);
         if (FAILED(hr)) {
@@ -551,6 +553,14 @@ public:
     // ICoreWebView2NavigationCompletedEventHandler
     HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2* /*sender*/, ICoreWebView2NavigationCompletedEventArgs* /*args*/) override {
         m_isReady = true;
+        if (m_transparentBg && m_controller) {
+            ICoreWebView2Controller2* ctrl2 = nullptr;
+            if (SUCCEEDED(m_controller->QueryInterface(IID_ICoreWebView2Controller2, (void**)&ctrl2)) && ctrl2) {
+                COREWEBVIEW2_COLOR trans = { 0, 0, 0, 0 };
+                ctrl2->put_DefaultBackgroundColor(trans);
+                ctrl2->Release();
+            }
+        }
         if (m_onReady) {
             m_onReady();
         }

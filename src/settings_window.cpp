@@ -236,25 +236,25 @@ static std::wstring GetSettingsHtml() {
   }
 
   body.light {
-    --bg-fallback: #F3F3F3;
-    --card-bg: rgba(255, 255, 255, 0.76);
-    --card-sub-bg: rgba(255, 255, 255, 0.52);
-    --card-hover: rgba(255, 255, 255, 0.90);
+    --bg-fallback: transparent;
+    --card-bg: rgba(255, 255, 255, 0.60);
+    --card-sub-bg: rgba(255, 255, 255, 0.40);
+    --card-hover: rgba(255, 255, 255, 0.82);
     --card-border: rgba(0, 0, 0, 0.065);
-    --card-border-top: rgba(255, 255, 255, 0.90);
-    --top-slot-bg: #E2E2E7;
-    --top-slot-border: rgba(0, 0, 0, 0.13);
+    --card-border-top: rgba(255, 255, 255, 0.85);
+    --top-slot-bg: rgba(0, 0, 0, 0.05);
+    --top-slot-border: rgba(0, 0, 0, 0.10);
     --nav-hover: rgba(0, 0, 0, 0.04);
     --nav-active: rgba(0, 0, 0, 0.065);
     --text-primary: #1A1A1A;
     --text-secondary: rgba(0, 0, 0, 0.65);
     --text-muted: rgba(0, 0, 0, 0.46);
     --track-bg: rgba(0, 0, 0, 0.12);
-    --btn-bg: rgba(255, 255, 255, 0.78);
-    --btn-hover: rgba(255, 255, 255, 0.95);
+    --btn-bg: rgba(255, 255, 255, 0.65);
+    --btn-hover: rgba(255, 255, 255, 0.85);
     --btn-active: rgba(0, 0, 0, 0.04);
     --btn-border: rgba(0, 0, 0, 0.10);
-    --input-bg: rgba(255, 255, 255, 0.92);
+    --input-bg: rgba(255, 255, 255, 0.75);
     --switch-off-bg: rgba(0, 0, 0, 0.02);
     --switch-off-border: rgba(0, 0, 0, 0.55);
     --switch-off-thumb: rgba(0, 0, 0, 0.68);
@@ -273,10 +273,15 @@ static std::wstring GetSettingsHtml() {
     width: 100%;
     height: 100%;
     background: transparent !important;
+    background-color: transparent !important;
     color: var(--text-primary);
     font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
+  }
+
+  .app-shell, .nav-pane, .content-pane {
+    background: transparent !important;
   }
 
   .fluent-icon {
@@ -1756,6 +1761,13 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     switch (msg) {
         case WM_ERASEBKGND: {
             return 1;
+        }
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            BeginPaint(hWnd, &ps);
+            EndPaint(hWnd, &ps);
+            return 0;
         }
 
         case WM_GETMINMAXINFO: {

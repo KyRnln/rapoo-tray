@@ -297,12 +297,16 @@ static void ConfigureTransparentContainer(HWND hWnd) {
     COLORREF noBorder = 0xFFFFFFFE; // DWMWA_COLOR_NONE
     DwmSetWindowAttribute(hWnd, 34, &noBorder, sizeof(noBorder));
 
-    // Enable Windows 11 Mica / Acrylic backdrop in DWM
-    DWORD backdrop = 2; // DWMSBT_MAINWINDOW (Mica)
+    // Enable Windows 11 Acrylic / Mica backdrop in DWM
+    DWORD backdrop = 3; // DWMSBT_TRANSIENTWINDOW (Acrylic for flyout popups)
     HRESULT hr = DwmSetWindowAttribute(hWnd, 38, &backdrop, sizeof(backdrop));
     if (FAILED(hr)) {
-        BOOL mica = TRUE;
-        DwmSetWindowAttribute(hWnd, 1029, &mica, sizeof(mica));
+        backdrop = 2; // DWMSBT_MAINWINDOW (Mica fallback)
+        hr = DwmSetWindowAttribute(hWnd, 38, &backdrop, sizeof(backdrop));
+        if (FAILED(hr)) {
+            BOOL mica = TRUE;
+            DwmSetWindowAttribute(hWnd, 1029, &mica, sizeof(mica));
+        }
     }
 }
 
@@ -314,9 +318,9 @@ static std::wstring GetNotificationHtml() {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
   :root {
-    --bg-card: rgba(32, 32, 32, 0.78);
-    --border-card: rgba(255, 255, 255, 0.16);
-    --divider: rgba(255, 255, 255, 0.10);
+    --bg-card: rgba(30, 30, 30, 0.65);
+    --border-card: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.08);
     --text-primary: #FFFFFF;
     --text-secondary: rgba(255, 255, 255, 0.72);
     --text-muted: rgba(255, 255, 255, 0.48);
@@ -325,9 +329,9 @@ static std::wstring GetNotificationHtml() {
   }
 
   body.light {
-    --bg-card: rgba(246, 246, 248, 0.82);
-    --border-card: rgba(0, 0, 0, 0.12);
-    --divider: rgba(0, 0, 0, 0.08);
+    --bg-card: rgba(255, 255, 255, 0.65);
+    --border-card: rgba(0, 0, 0, 0.10);
+    --divider: rgba(0, 0, 0, 0.06);
     --text-primary: #1A1A1A;
     --text-secondary: rgba(0, 0, 0, 0.65);
     --text-muted: rgba(0, 0, 0, 0.46);
@@ -346,6 +350,7 @@ static std::wstring GetNotificationHtml() {
     width: 100%;
     height: 100%;
     background: transparent !important;
+    background-color: transparent !important;
     overflow: hidden;
     font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -356,8 +361,8 @@ static std::wstring GetNotificationHtml() {
     width: 100%;
     height: 100%;
     background: var(--bg-card);
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--border-card);
     border-radius: 8px;
     padding: 0;
@@ -784,6 +789,13 @@ static LRESULT CALLBACK FlyoutWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
     switch (msg) {
         case WM_ERASEBKGND: {
             return 1;
+        }
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            BeginPaint(hWnd, &ps);
+            EndPaint(hWnd, &ps);
+            return 0;
         }
 
         case WM_SIZE: {
