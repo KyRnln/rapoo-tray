@@ -9,27 +9,6 @@
     Title="外设状态">
 
     <Grid Background="Transparent">
-        <Grid.Resources>
-            <Storyboard x:Name="SlideUpStoryboard">
-                <DoubleAnimation Storyboard.TargetName="WindowTranslateTransform"
-                                 Storyboard.TargetProperty="Y"
-                                 From="18" To="0"
-                                 Duration="0:0:0.20">
-                    <DoubleAnimation.EasingFunction>
-                        <CircleEase EasingMode="EaseOut" />
-                    </DoubleAnimation.EasingFunction>
-                </DoubleAnimation>
-                <DoubleAnimation Storyboard.TargetName="RootBorder"
-                                 Storyboard.TargetProperty="Opacity"
-                                 From="0.0" To="1.0"
-                                 Duration="0:0:0.18">
-                    <DoubleAnimation.EasingFunction>
-                        <CubicEase EasingMode="EaseOut" />
-                    </DoubleAnimation.EasingFunction>
-                </DoubleAnimation>
-            </Storyboard>
-        </Grid.Resources>
-
         <!-- Main Card Container: Windows 11 Rounded with single seamless dark/gray accent border -->
         <Border x:Name="RootBorder"
                 Margin="0"
@@ -37,10 +16,6 @@
                 BorderBrush="{ThemeResource FlyoutBorderThemeBrush}"
                 BorderThickness="1"
                 CornerRadius="8">
-            <Border.RenderTransform>
-                <TranslateTransform x:Name="WindowTranslateTransform" Y="0" />
-            </Border.RenderTransform>
-
             <Grid RowDefinitions="Auto,*,Auto">
                 <!-- Header: Transparent, text only (no icon, no top border artifact) -->
                 <Grid Grid.Row="0" Padding="14,12,14,6">

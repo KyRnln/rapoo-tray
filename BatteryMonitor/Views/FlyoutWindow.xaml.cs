@@ -54,6 +54,20 @@ namespace BatteryMonitor.Views
         private AppWindow _appWindow;
         private IntPtr _hWnd;
         private bool _isShowing = false;
+        private bool _isClosing = false;
+        private long _lastBarDismissTicks = 0;
+
+        private bool _isAnimRunning = false;
+        private readonly System.Diagnostics.Stopwatch _animStopwatch = new();
+        private double _animDurationMs = 240.0;
+        private int _animStartX;
+        private int _animStartY;
+        private int _animTargetX;
+        private int _animTargetY;
+        private bool _animIsEntering = true;
+        private double _dpiScale = 1.0;
+        private int _targetX = 0;
+        private int _targetY = 0;
 
         private WindowsSystemDispatcherQueueHelper? _wsdqHelper;
         private DesktopAcrylicController? _acrylicController;
@@ -112,6 +126,46 @@ namespace BatteryMonitor.Views
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
+        private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MSLLHOOKSTRUCT
+        {
+            public POINT pt;
+            public uint mouseData;
+            public uint flags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        private const int WH_MOUSE_LL = 14;
+        private const int WM_LBUTTONDOWN = 0x0201;
+        private const int WM_RBUTTONDOWN = 0x0204;
+        private const int WM_MBUTTONDOWN = 0x0207;
+        private const int WM_NCLBUTTONDOWN = 0x00A1;
+        private const int WM_NCRBUTTONDOWN = 0x00A4;
+        private const int WM_NCMBUTTONDOWN = 0x00A7;
+
+        private IntPtr _mouseHook = IntPtr.Zero;
+        private LowLevelMouseProc? _mouseProc;
+
         private const int GWL_STYLE = -16;
         private const int WS_POPUP = unchecked((int)0x80000000);
         private const int WS_BORDER = 0x00800000;
@@ -125,6 +179,7 @@ namespace BatteryMonitor.Views
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOZORDER = 0x0004;
+        private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_FRAMECHANGED = 0x0020;
 
         private const int GWL_EXSTYLE = -20;
@@ -180,6 +235,11 @@ namespace BatteryMonitor.Views
             TrySetCustomAcrylic();
 
             this.Activated += OnWindowActivated;
+            this.Closed += (s, e) =>
+            {
+                UninstallMouseHook();
+                StopSlideAnimation();
+            };
         }
 
         private void ApplyBorderlessStyles()
@@ -241,9 +301,12 @@ namespace BatteryMonitor.Views
 
         private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
         {
-            if (args.WindowActivationState == WindowActivationState.Deactivated && _isShowing)
+            if (args.WindowActivationState == WindowActivationState.Deactivated && _isShowing && !_isClosing)
             {
-                HideFlyout();
+                if (Environment.TickCount64 - _lastBarDismissTicks >= 450)
+                {
+                    HideFlyout();
+                }
             }
             if (_configurationSource != null)
             {
@@ -254,7 +317,13 @@ namespace BatteryMonitor.Views
 
         public void Toggle()
         {
-            if (_isShowing)
+            // 防抖：450ms 内如果在常驻条上刚刚按压触发了关闭，避免松开时重复打开
+            if (Environment.TickCount64 - _lastBarDismissTicks < 450)
+            {
+                return;
+            }
+
+            if (_isShowing || _isClosing)
             {
                 HideFlyout();
             }
@@ -264,8 +333,88 @@ namespace BatteryMonitor.Views
             }
         }
 
+        private void StartSlideAnimation(bool isEntering, int startX, int startY, int targetX, int targetY, double durationMs)
+        {
+            _animIsEntering = isEntering;
+            _animStartX = startX;
+            _animStartY = startY;
+            _animTargetX = targetX;
+            _animTargetY = targetY;
+            _animDurationMs = durationMs;
+
+            _animStopwatch.Restart();
+
+            if (!_isAnimRunning)
+            {
+                _isAnimRunning = true;
+                CompositionTarget.Rendering += OnCompositionRendering;
+            }
+        }
+
+        private void StopSlideAnimation()
+        {
+            if (_isAnimRunning)
+            {
+                CompositionTarget.Rendering -= OnCompositionRendering;
+                _isAnimRunning = false;
+                _animStopwatch.Stop();
+            }
+        }
+
+        private void OnCompositionRendering(object? sender, object e)
+        {
+            if (!_isAnimRunning) return;
+
+            double elapsed = _animStopwatch.Elapsed.TotalMilliseconds;
+            double t = elapsed / _animDurationMs;
+
+            if (t >= 1.0)
+            {
+                t = 1.0;
+                StopSlideAnimation();
+
+                // Snap to final exact target position
+                SetWindowPos(_hWnd, IntPtr.Zero, _animTargetX, _animTargetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+                if (_animIsEntering)
+                {
+                    _isShowing = true;
+                    _isClosing = false;
+                }
+                else
+                {
+                    _isShowing = false;
+                    _isClosing = false;
+                    _appWindow.Hide();
+                }
+                return;
+            }
+
+            // Calculate eased progress
+            double eased;
+            if (_animIsEntering)
+            {
+                // EaseOutCubic: 1 - (1 - t)^3 (smooth deceleration into resting position)
+                double inv = 1.0 - t;
+                eased = 1.0 - (inv * inv * inv);
+            }
+            else
+            {
+                // EaseInCubic: t^3 (smooth acceleration downward into taskbar)
+                eased = t * t * t;
+            }
+
+            int curX = (int)Math.Round(_animStartX + (_animTargetX - _animStartX) * eased);
+            int curY = (int)Math.Round(_animStartY + (_animTargetY - _animStartY) * eased);
+
+            SetWindowPos(_hWnd, IntPtr.Zero, curX, curY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+
         public void ShowAtTaskbar()
         {
+            StopSlideAnimation();
+            _isClosing = false;
+
             UpdateDeviceList();
 
             // Determine target monitor and DPI scale factor
@@ -289,7 +438,7 @@ namespace BatteryMonitor.Views
             int count = DeviceListPanel.Children.Count;
             // DIP dimensions
             int logicalWidth = 340;
-            // Header (44) + cards (count * 88) + footer (44) + vertical padding
+            // Header (48) + cards (count * 88) + footer (44) + vertical padding
             int logicalHeight = Math.Clamp(48 + (Math.Max(1, count) * 88) + 44, 140, 560);
 
             // Convert DIP to physical pixels for AppWindow.MoveAndResize
@@ -315,32 +464,128 @@ namespace BatteryMonitor.Views
             if (targetX < mi.rcWork.Left + margin) targetX = mi.rcWork.Left + margin;
             if (targetY < mi.rcWork.Top + margin) targetY = mi.rcWork.Top + margin;
 
-            _appWindow.MoveAndResize(new RectInt32(targetX, targetY, physicalWidth, physicalHeight));
+            _targetX = targetX;
+            _targetY = targetY;
+            _dpiScale = scale;
+
+            // 向上滑入距离 (约 36 DIP)
+            int slideDistance = (int)Math.Round(36 * scale);
+            int startY = targetY + slideDistance;
+
+            // 初始在目标下方 startY 处设置尺寸并显示，确保整个卡片（亚克力+边框+内容）作为一个整体向上滑出
+            _appWindow.MoveAndResize(new RectInt32(targetX, startY, physicalWidth, physicalHeight));
 
             if (_configurationSource != null)
             {
                 _configurationSource.IsInputActive = true;
             }
 
-            // Reset animation state
-            WindowTranslateTransform.Y = 20;
-            RootBorder.Opacity = 0.0;
-
             ApplyBorderlessStyles();
             this.Activate();
             ApplyBorderlessStyles();
             _isShowing = true;
 
-            SlideUpStoryboard?.Begin();
+            // 启动原生级物理窗口向上平滑滑动动画 (250ms, CubicEaseOut)
+            StartSlideAnimation(isEntering: true, targetX, startY, targetX, targetY, 250.0);
+
+            InstallMouseHook();
         }
 
         public void HideFlyout()
         {
-            if (!_isShowing) return;
+            if (!_isShowing && !_isClosing) return;
+            if (_isClosing) return;
+
+            _isClosing = true;
             _isShowing = false;
-            SlideUpStoryboard?.Stop();
-            RootBorder.Opacity = 0.0;
-            _appWindow.Hide();
+            UninstallMouseHook();
+
+            // 获取当前实际窗口位置，如果正在滑入过程中被中断也能无缝反向滑落
+            int curX = _targetX;
+            int curY = _targetY;
+            if (GetWindowRect(_hWnd, out var curRect))
+            {
+                curX = curRect.Left;
+                curY = curRect.Top;
+            }
+
+            int slideDistance = (int)Math.Round(36 * _dpiScale);
+            int targetEndY = _targetY + slideDistance;
+
+            // 启动原生级物理窗口向下平滑滑动退场动画 (200ms, CubicEaseIn)
+            StartSlideAnimation(isEntering: false, curX, curY, curX, targetEndY, 200.0);
+        }
+
+        private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode >= 0 && _isShowing && !_isClosing)
+            {
+                int msg = wParam.ToInt32();
+                if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN ||
+                    msg == WM_NCLBUTTONDOWN || msg == WM_NCRBUTTONDOWN || msg == WM_NCMBUTTONDOWN)
+                {
+                    try
+                    {
+                        var hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                        POINT pt = hookStruct.pt;
+
+                        if (GetWindowRect(_hWnd, out var flyoutRect))
+                        {
+                            bool inFlyout = (pt.X >= flyoutRect.Left && pt.X <= flyoutRect.Right &&
+                                             pt.Y >= flyoutRect.Top && pt.Y <= flyoutRect.Bottom);
+
+                            if (!inFlyout)
+                            {
+                                bool inBar = false;
+                                if (NativeCore.RapooCore_GetBarRect(out var barRect) && barRect.Bottom > 0)
+                                {
+                                    inBar = (pt.X >= barRect.Left && pt.X <= barRect.Right &&
+                                             pt.Y >= barRect.Top && pt.Y <= barRect.Bottom);
+                                }
+
+                                if (inBar)
+                                {
+                                    // 点击在常驻进度条上：作为第二次点击关闭，记录防抖时间戳并执行向下滑动关闭
+                                    _lastBarDismissTicks = Environment.TickCount64;
+                                    this.DispatcherQueue.TryEnqueue(() =>
+                                    {
+                                        HideFlyout();
+                                    });
+                                }
+                                else
+                                {
+                                    // 点击在外部空白区域：向下滑动关闭
+                                    this.DispatcherQueue.TryEnqueue(() =>
+                                    {
+                                        HideFlyout();
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+        }
+
+        private void InstallMouseHook()
+        {
+            if (_mouseHook != IntPtr.Zero) return;
+            _mouseProc = MouseHookCallback;
+            using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
+            using var curModule = curProcess.MainModule;
+            _mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _mouseProc, GetModuleHandle(curModule?.ModuleName), 0);
+        }
+
+        private void UninstallMouseHook()
+        {
+            if (_mouseHook != IntPtr.Zero)
+            {
+                UnhookWindowsHookEx(_mouseHook);
+                _mouseHook = IntPtr.Zero;
+                _mouseProc = null;
+            }
         }
 
         public void RefreshState()

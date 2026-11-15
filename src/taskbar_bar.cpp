@@ -477,6 +477,17 @@ static bool IsFullscreenGameActive() {
                 rcApp.top <= mi.rcMonitor.top &&
                 rcApp.right >= mi.rcMonitor.right &&
                 rcApp.bottom >= mi.rcMonitor.bottom) {
+                // If the taskbar itself is still showing on screen, the bar is part of the taskbar and should NOT hide!
+                if (hTaskbar && IsWindow(hTaskbar) && IsWindowVisible(hTaskbar)) {
+                    RECT rcTb = {0};
+                    GetWindowRect(hTaskbar, &rcTb);
+                    if ((rcTb.right - rcTb.left) > 0 && (rcTb.bottom - rcTb.top) > 0) {
+                        // If taskbar is not completely covered by the foreground window, don't hide
+                        if (rcApp.left > rcTb.left || rcApp.top > rcTb.top || rcApp.right < rcTb.right || rcApp.bottom < rcTb.bottom) {
+                            return false;
+                        }
+                    }
+                }
                 return true;
             }
         }
@@ -872,13 +883,15 @@ static void RepaintBar() {
 
     UpdateLayeredWindow(g_hWnd, hdcScreen, &ptDst, &sizeWnd, memDC, &ptSrc, 0, &bf, ULW_ALPHA);
 
-    SetWindowPos(g_hWnd, HWND_TOPMOST, posX, posY, pillW, pillH, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-
     s_lastPosX = posX;
     s_lastPosY = posY;
     s_lastPillW = pillW;
     s_lastPillH = pillH;
     s_lastDark = isDark;
+
+    if (!IsWindowVisible(g_hWnd)) {
+        ShowWindow(g_hWnd, SW_SHOWNOACTIVATE);
+    }
 
     SelectObject(memDC, oldBmp);
     DeleteObject(hbm);
@@ -989,13 +1002,15 @@ static bool EnsureBarWindowCreated() {
         s_classRegistered = true;
     }
 
+    HWND hTaskbar = FindWindowW(L"Shell_TrayWnd", NULL);
+
     g_hWnd = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
         L"RapooTaskbarBarWindow",
         L"RapooTaskbarBar",
         WS_POPUP,
         0, 0, 140, 32,
-        NULL, NULL, g_hInst, NULL
+        hTaskbar, NULL, g_hInst, NULL
     );
 
     if (!g_hWnd) {
@@ -1091,6 +1106,11 @@ void CheckAndEnsureVisible() {
         return;
     }
 
+    HWND curOwner = (HWND)GetWindowLongPtrW(g_hWnd, GWLP_HWNDPARENT);
+    if (curOwner != hTaskbar) {
+        SetWindowLongPtrW(g_hWnd, GWLP_HWNDPARENT, (LONG_PTR)hTaskbar);
+    }
+
     // 4. Check geometry, theme and visibility
     int dpi = GetCurrentDpi(g_hWnd);
     int pillW = ScaleDpi(s_width, dpi);
@@ -1107,8 +1127,6 @@ void CheckAndEnsureVisible() {
 
     if (needRepaint) {
         RepaintBar();
-    } else {
-        SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
 
