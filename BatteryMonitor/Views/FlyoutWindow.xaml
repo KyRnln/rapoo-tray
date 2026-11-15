@@ -30,9 +30,9 @@
             </Storyboard>
         </Grid.Resources>
 
-        <!-- Main Card Container: Windows 11 Rounded with subtle dark/gray accent border -->
+        <!-- Main Card Container: Windows 11 Rounded with single seamless dark/gray accent border -->
         <Border x:Name="RootBorder"
-                Margin="1"
+                Margin="0"
                 Background="Transparent"
                 BorderBrush="{ThemeResource FlyoutBorderThemeBrush}"
                 BorderThickness="1"

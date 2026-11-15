@@ -196,15 +196,16 @@ namespace BatteryMonitor.Views
             exStyle &= ~WS_EX_APPWINDOW;
             SetWindowLong(_hWnd, GWL_EXSTYLE, exStyle);
 
-            SetWindowPos(_hWnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-
             // Windows 11 Fluent rounded corners
             int cornerPref = DWMWCP_ROUND;
             DwmSetWindowAttribute(_hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPref, sizeof(int));
 
-            // Suppress harsh opaque DWM border so XAML translucent FlyoutBorderThemeBrush (reduced 50% opacity) renders smoothly
+            // Completely eliminate outer system DWM border artifact so only XAML seamless accent border is visible
             int borderColor = unchecked((int)0xFFFFFFFE);
             DwmSetWindowAttribute(_hWnd, DWMWA_BORDER_COLOR, ref borderColor, sizeof(int));
+
+            // Force non-client redraw to apply changes immediately
+            SetWindowPos(_hWnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
         }
 
         private bool TrySetCustomAcrylic()
