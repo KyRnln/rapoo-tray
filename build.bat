@@ -35,6 +35,9 @@ if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to compile rapoo_core.dll
     exit /b 1
 )
+copy /y bin\rapoo_core.dll bin\Release\rapoo_core.dll >nul
+if exist "bin\rapoo-tray.exe" del /f /q "bin\rapoo-tray.exe"
+if exist "bin\Release\RapooTray.exe" del /f /q "bin\Release\RapooTray.exe"
 
 echo [2/2] Publishing Self-Contained WinUI 3 App (bin\Release\BatteryMonitor.exe) ...
 cd BatteryMonitor

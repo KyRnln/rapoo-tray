@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Threading;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.Win32;
 using BatteryMonitor.Services;
 using BatteryMonitor.Views;
 
@@ -27,6 +29,9 @@ namespace BatteryMonitor
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
+            // Ensure working directory is application base directory (prevents System32 on auto-start)
+            Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+
             const string mutexName = @"Local\BatteryMonitorSingleInstance";
             s_singleInstanceMutex = new Mutex(true, mutexName, out bool createdNew);
             if (!createdNew)
@@ -34,6 +39,9 @@ namespace BatteryMonitor
                 Environment.Exit(0);
                 return;
             }
+
+            // Clean legacy startup entries and synchronize to new executable
+            MigrateAndCleanAutoStartRegistry();
 
             s_dispatcherQueue = DispatcherQueue.GetForCurrentThread();
 
@@ -86,6 +94,39 @@ namespace BatteryMonitor
                 }
                 s_settingsWindow.Activate();
             });
+        }
+
+        private static void MigrateAndCleanAutoStartRegistry()
+        {
+            const string runRegKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+            const string appRunName = "BatteryMonitor";
+            string[] legacyNames = new[] { "RapooTray", "rapoo-tray" };
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(runRegKey, true);
+                if (key == null) return;
+
+                bool hadLegacyAutoStart = false;
+                foreach (var legacy in legacyNames)
+                {
+                    if (key.GetValue(legacy) != null)
+                    {
+                        hadLegacyAutoStart = true;
+                        key.DeleteValue(legacy, false);
+                    }
+                }
+
+                string currentExePath = Environment.ProcessPath ?? "";
+                if (!string.IsNullOrEmpty(currentExePath))
+                {
+                    if (hadLegacyAutoStart || key.GetValue(appRunName) != null)
+                    {
+                        key.SetValue(appRunName, $"\"{currentExePath}\"");
+                    }
+                }
+            }
+            catch { }
         }
 
         public static void ExitApplication()

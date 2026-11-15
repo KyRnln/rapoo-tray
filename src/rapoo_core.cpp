@@ -16,6 +16,11 @@ extern "C" {
 static const UINT WM_APP_TRAYMSG = WM_APP + 1;
 static const UINT WM_APP_STATE_UPDATE = WM_APP + 2;
 
+static const UINT_PTR TIMER_CORE_HEARTBEAT = 3001;
+static const UINT_PTR TIMER_POST_RESTART_1 = 3002;
+static const UINT_PTR TIMER_POST_RESTART_2 = 3003;
+static const UINT_PTR TIMER_POST_RESTART_3 = 3004;
+
 static HWND g_hCoreWnd = NULL;
 static NOTIFYICONDATAW g_nid = {0};
 static UINT g_uTaskbarRestartMsg = 0;
@@ -88,11 +93,27 @@ static LRESULT CALLBACK CoreWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
         Shell_NotifyIconW(NIM_ADD, &g_nid);
         Device::State st = Device::GetCurrentState();
         UpdateTrayTooltipInternal(st);
-        TaskbarBar::Invalidate();
+        TaskbarBar::Recreate();
+        SetTimer(hWnd, TIMER_POST_RESTART_1, 500, NULL);
+        SetTimer(hWnd, TIMER_POST_RESTART_2, 1500, NULL);
+        SetTimer(hWnd, TIMER_POST_RESTART_3, 3000, NULL);
         return 0;
     }
 
     switch (msg) {
+        case WM_TIMER: {
+            if (wParam == TIMER_CORE_HEARTBEAT) {
+                TaskbarBar::CheckAndEnsureVisible();
+                return 0;
+            }
+            if (wParam == TIMER_POST_RESTART_1 || wParam == TIMER_POST_RESTART_2 || wParam == TIMER_POST_RESTART_3) {
+                KillTimer(hWnd, wParam);
+                TaskbarBar::Invalidate();
+                return 0;
+            }
+            return 0;
+        }
+
         case WM_APP_TRAYMSG: {
             if (lParam == WM_LBUTTONUP) {
                 // 点击图标不再弹出电量面板 (Clicking tray icon doesn't pop up panel)
@@ -198,10 +219,16 @@ RAPOO_API bool RapooCore_Init() {
     // Initialize Taskbar resident bar
     TaskbarBar::Init(hInst, g_hCoreWnd);
 
+    // Start background core heartbeat watchdog (1s interval)
+    SetTimer(g_hCoreWnd, TIMER_CORE_HEARTBEAT, 1000, NULL);
+
     return true;
 }
 
 RAPOO_API void RapooCore_Cleanup() {
+    if (g_hCoreWnd) {
+        KillTimer(g_hCoreWnd, TIMER_CORE_HEARTBEAT);
+    }
     if (g_hDevNotify) {
         UnregisterDeviceNotification(g_hDevNotify);
         g_hDevNotify = NULL;

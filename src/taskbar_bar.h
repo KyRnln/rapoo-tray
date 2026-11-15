@@ -10,6 +10,12 @@ bool Init(HINSTANCE hInstance, HWND hMainWnd);
 // Cleanup window and GDI+ resources
 void Cleanup();
 
+// Recreate the taskbar bar window (used after Explorer restart or if watchdog detects destroyed window)
+void Recreate();
+
+// Heartbeat watchdog called periodically from core message loop
+void CheckAndEnsureVisible();
+
 // Update display with latest device telemetry
 void UpdateState(const Device::State& state);
 

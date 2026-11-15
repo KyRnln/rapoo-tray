@@ -567,12 +567,20 @@ namespace BatteryMonitor.Views
             catch { }
         }
 
+        private static readonly string[] LegacyRunNames = new[] { "RapooTray", "rapoo-tray" };
+
         private bool CheckAutoStart()
         {
             try
             {
                 using var key = Registry.CurrentUser.OpenSubKey(RunRegKey, false);
-                return key?.GetValue(AppRunName) != null;
+                if (key == null) return false;
+                if (key.GetValue(AppRunName) != null) return true;
+                foreach (var legacy in LegacyRunNames)
+                {
+                    if (key.GetValue(legacy) != null) return true;
+                }
+                return false;
             }
             catch
             {
@@ -587,6 +595,11 @@ namespace BatteryMonitor.Views
                 using var key = Registry.CurrentUser.OpenSubKey(RunRegKey, true);
                 if (key != null)
                 {
+                    foreach (var legacy in LegacyRunNames)
+                    {
+                        key.DeleteValue(legacy, false);
+                    }
+
                     if (enable)
                     {
                         string exePath = Environment.ProcessPath ?? "";

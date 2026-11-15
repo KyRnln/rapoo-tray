@@ -458,6 +458,8 @@ static bool IsFullscreenGameActive() {
                 _wcsicmp(exe, L"SearchApp.exe") == 0 ||
                 _wcsicmp(exe, L"ShellExperienceHost.exe") == 0 ||
                 _wcsicmp(exe, L"StartMenuExperienceHost.exe") == 0 ||
+                _wcsicmp(exe, L"LockApp.exe") == 0 ||
+                _wcsicmp(exe, L"LogonUI.exe") == 0 ||
                 _wcsicmp(exe, L"Taskmgr.exe") == 0) {
                 CloseHandle(hProc);
                 return false;
@@ -482,57 +484,51 @@ static bool IsFullscreenGameActive() {
     return false;
 }
 
-static void CalculateTaskbarPosition(int pillW, int pillH, int dpi, int* outX, int* outY) {
+static bool CalculateTaskbarPosition(int pillW, int pillH, int dpi, int* outX, int* outY) {
     auto S = [dpi](int v) { return ScaleDpi(v, dpi); };
 
     HWND hTaskbar = FindWindowW(L"Shell_TrayWnd", NULL);
+    if (!hTaskbar || !IsWindow(hTaskbar)) {
+        return false;
+    }
+
     RECT rcTaskbar = {0};
     RECT rcTray = {0};
     RECT rcStart = {0};
     RECT rcTasks = {0};
 
-    if (hTaskbar && IsWindow(hTaskbar)) {
-        GetWindowRect(hTaskbar, &rcTaskbar);
+    GetWindowRect(hTaskbar, &rcTaskbar);
 
-        HWND hTray = FindWindowExW(hTaskbar, NULL, L"TrayNotifyWnd", NULL);
-        if (hTray && IsWindow(hTray)) {
-            GetWindowRect(hTray, &rcTray);
-        }
+    HWND hTray = FindWindowExW(hTaskbar, NULL, L"TrayNotifyWnd", NULL);
+    if (hTray && IsWindow(hTray)) {
+        GetWindowRect(hTray, &rcTray);
+    }
 
-        HWND hStart = FindWindowExW(hTaskbar, NULL, L"Start", NULL);
-        if (hStart && IsWindow(hStart)) {
-            GetWindowRect(hStart, &rcStart);
-        }
+    HWND hStart = FindWindowExW(hTaskbar, NULL, L"Start", NULL);
+    if (hStart && IsWindow(hStart)) {
+        GetWindowRect(hStart, &rcStart);
+    }
 
-        HWND hRebar = FindWindowExW(hTaskbar, NULL, L"ReBarWindow32", NULL);
-        if (hRebar && IsWindow(hRebar)) {
-            GetWindowRect(hRebar, &rcTasks);
-        } else {
-            HWND hTaskSw = FindWindowExW(hTaskbar, NULL, L"MSTaskSwWClass", NULL);
-            if (hTaskSw && IsWindow(hTaskSw)) {
-                GetWindowRect(hTaskSw, &rcTasks);
-            }
+    HWND hRebar = FindWindowExW(hTaskbar, NULL, L"ReBarWindow32", NULL);
+    if (hRebar && IsWindow(hRebar)) {
+        GetWindowRect(hRebar, &rcTasks);
+    } else {
+        HWND hTaskSw = FindWindowExW(hTaskbar, NULL, L"MSTaskSwWClass", NULL);
+        if (hTaskSw && IsWindow(hTaskSw)) {
+            GetWindowRect(hTaskSw, &rcTasks);
         }
     }
 
     if (rcTaskbar.right <= rcTaskbar.left || rcTaskbar.bottom <= rcTaskbar.top) {
         APPBARDATA abd = { sizeof(APPBARDATA) };
         abd.hWnd = hTaskbar;
-        if (hTaskbar && SHAppBarMessage(ABM_GETTASKBARPOS, &abd)) {
+        if (SHAppBarMessage(ABM_GETTASKBARPOS, &abd)) {
             rcTaskbar = abd.rc;
-        } else {
-            RECT rcWork = {0};
-            SystemParametersInfoW(SPI_GETWORKAREA, 0, &rcWork, 0);
-            if (s_position == POS_LEFT) {
-                *outX = rcWork.left + S(12);
-            } else if (s_position == POS_CENTER) {
-                *outX = rcWork.left + (rcWork.right - rcWork.left - pillW) / 2;
-            } else {
-                *outX = rcWork.right - pillW - S(12);
-            }
-            *outY = rcWork.bottom - pillH - S(8);
-            return;
         }
+    }
+
+    if (rcTaskbar.right <= rcTaskbar.left || rcTaskbar.bottom <= rcTaskbar.top) {
+        return false;
     }
 
     int taskbarW = rcTaskbar.right - rcTaskbar.left;
@@ -641,6 +637,7 @@ static void CalculateTaskbarPosition(int pillW, int pillH, int dpi, int* outX, i
 
     *outX = posX;
     *outY = posY;
+    return true;
 }
 
 static void RepaintBar() {
@@ -659,7 +656,11 @@ static void RepaintBar() {
     int pillH = S(32);
 
     int posX = 0, posY = 0;
-    CalculateTaskbarPosition(pillW, pillH, dpi, &posX, &posY);
+    if (!CalculateTaskbarPosition(pillW, pillH, dpi, &posX, &posY)) {
+        s_lastPosX = -9999;
+        s_lastPosY = -9999;
+        return;
+    }
 
     HDC hdcScreen = GetDC(NULL);
     HDC memDC = CreateCompatibleDC(hdcScreen);
@@ -871,21 +872,21 @@ static void RepaintBar() {
 
     UpdateLayeredWindow(g_hWnd, hdcScreen, &ptDst, &sizeWnd, memDC, &ptSrc, 0, &bf, ULW_ALPHA);
 
+    SetWindowPos(g_hWnd, HWND_TOPMOST, posX, posY, pillW, pillH, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
     s_lastPosX = posX;
     s_lastPosY = posY;
     s_lastPillW = pillW;
     s_lastPillH = pillH;
     s_lastDark = isDark;
 
-    if (!IsWindowVisible(g_hWnd)) {
-        ShowWindow(g_hWnd, SW_SHOWNOACTIVATE);
-    }
-
     SelectObject(memDC, oldBmp);
     DeleteObject(hbm);
     DeleteDC(memDC);
     ReleaseDC(NULL, hdcScreen);
 }
+
+void CheckAndEnsureVisible();
 
 static LRESULT CALLBACK TaskbarBarWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
@@ -906,26 +907,7 @@ static LRESULT CALLBACK TaskbarBarWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
 
         case WM_TIMER: {
             if (wParam == TIMER_UPDATE_POS) {
-                bool inGame = IsFullscreenGameActive();
-                if (inGame != s_inGameMode) {
-                    s_inGameMode = inGame;
-                    if (s_inGameMode) {
-                        ShowWindow(hWnd, SW_HIDE);
-                    } else if (s_enabled) {
-                        RepaintBar();
-                    }
-                } else if (!s_inGameMode && s_enabled) {
-                    // Only repaint if geometry (due to taskbar cluster movement) or theme changed
-                    int dpi = GetCurrentDpi(hWnd);
-                    int pillW = ScaleDpi(s_width, dpi);
-                    int pillH = ScaleDpi(32, dpi);
-                    int curX = 0, curY = 0;
-                    CalculateTaskbarPosition(pillW, pillH, dpi, &curX, &curY);
-                    bool dark = IsSystemDarkTheme();
-                    if (curX != s_lastPosX || curY != s_lastPosY || pillW != s_lastPillW || pillH != s_lastPillH || dark != s_lastDark) {
-                        RepaintBar();
-                    }
-                }
+                CheckAndEnsureVisible();
             }
             return 0;
         }
@@ -989,6 +971,45 @@ static LRESULT CALLBACK TaskbarBarWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
     }
 }
 
+static bool s_classRegistered = false;
+
+static bool EnsureBarWindowCreated() {
+    if (g_hWnd && IsWindow(g_hWnd)) {
+        return true;
+    }
+
+    if (!s_classRegistered) {
+        WNDCLASSEXW wc = {0};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = TaskbarBarWndProc;
+        wc.hInstance = g_hInst;
+        wc.lpszClassName = L"RapooTaskbarBarWindow";
+        wc.hCursor = LoadCursor(NULL, IDC_HAND);
+        RegisterClassExW(&wc);
+        s_classRegistered = true;
+    }
+
+    g_hWnd = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+        L"RapooTaskbarBarWindow",
+        L"RapooTaskbarBar",
+        WS_POPUP,
+        0, 0, 140, 32,
+        NULL, NULL, g_hInst, NULL
+    );
+
+    if (!g_hWnd) {
+        return false;
+    }
+
+    s_lastPosX = -9999;
+    s_lastPosY = -9999;
+    s_lastPillW = 0;
+    s_lastPillH = 0;
+
+    return true;
+}
+
 bool Init(HINSTANCE hInstance, HWND hMainWnd) {
     g_hInst = hInstance;
     g_hMainAppWnd = hMainWnd;
@@ -1009,37 +1030,86 @@ bool Init(HINSTANCE hInstance, HWND hMainWnd) {
     s_iconAlign = LoadIconAlignRegistry();
     s_barColorMode = LoadBarColorRegistry();
 
-    HWND hTaskbar = FindWindowW(L"Shell_TrayWnd", NULL);
-
-    WNDCLASSEXW wc = {0};
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = TaskbarBarWndProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = L"RapooTaskbarBarWindow";
-    wc.hCursor = LoadCursor(NULL, IDC_HAND);
-    RegisterClassExW(&wc);
-
-    g_hWnd = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
-        wc.lpszClassName,
-        L"RapooTaskbarBar",
-        WS_POPUP,
-        0, 0, 140, 32,
-        hTaskbar, NULL, hInstance, NULL
-    );
-
-    if (!g_hWnd) {
-        return false;
-    }
+    EnsureBarWindowCreated();
 
     if (s_enabled) {
         s_currentState = Device::GetCurrentState();
         RepaintBar();
-    } else {
+    } else if (g_hWnd && IsWindow(g_hWnd)) {
         ShowWindow(g_hWnd, SW_HIDE);
     }
 
     return true;
+}
+
+void Recreate() {
+    if (g_hWnd && IsWindow(g_hWnd)) {
+        DestroyWindow(g_hWnd);
+        g_hWnd = NULL;
+    }
+    s_lastPosX = -9999;
+    s_lastPosY = -9999;
+    s_lastPillW = 0;
+    s_lastPillH = 0;
+
+    if (EnsureBarWindowCreated() && s_enabled) {
+        s_currentState = Device::GetCurrentState();
+        RepaintBar();
+    }
+}
+
+void CheckAndEnsureVisible() {
+    if (!s_enabled) return;
+
+    // 1. Ensure bar window handle is valid
+    if (!g_hWnd || !IsWindow(g_hWnd)) {
+        if (!EnsureBarWindowCreated()) {
+            return;
+        }
+    }
+
+    // 2. Fullscreen game check
+    bool inGame = IsFullscreenGameActive();
+    if (inGame != s_inGameMode) {
+        s_inGameMode = inGame;
+        if (s_inGameMode) {
+            ShowWindow(g_hWnd, SW_HIDE);
+            return;
+        } else {
+            RepaintBar();
+            return;
+        }
+    }
+
+    if (s_inGameMode) {
+        return;
+    }
+
+    // 3. Check Taskbar readiness
+    HWND hTaskbar = FindWindowW(L"Shell_TrayWnd", NULL);
+    if (!hTaskbar || !IsWindow(hTaskbar)) {
+        return;
+    }
+
+    // 4. Check geometry, theme and visibility
+    int dpi = GetCurrentDpi(g_hWnd);
+    int pillW = ScaleDpi(s_width, dpi);
+    int pillH = ScaleDpi(32, dpi);
+    int curX = 0, curY = 0;
+    if (!CalculateTaskbarPosition(pillW, pillH, dpi, &curX, &curY)) {
+        return;
+    }
+
+    bool dark = IsSystemDarkTheme();
+    bool needRepaint = (curX != s_lastPosX || curY != s_lastPosY ||
+                        pillW != s_lastPillW || pillH != s_lastPillH ||
+                        dark != s_lastDark || !IsWindowVisible(g_hWnd));
+
+    if (needRepaint) {
+        RepaintBar();
+    } else {
+        SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 void Cleanup() {
@@ -1055,7 +1125,10 @@ void Cleanup() {
 
 void UpdateState(const Device::State& state) {
     s_currentState = state;
-    if (g_hWnd && IsWindow(g_hWnd) && s_enabled && !s_inGameMode) {
+    if (s_enabled && !s_inGameMode) {
+        if (!g_hWnd || !IsWindow(g_hWnd)) {
+            EnsureBarWindowCreated();
+        }
         RepaintBar();
     }
 }
@@ -1220,7 +1293,12 @@ void Hide() {
 }
 
 void Invalidate() {
-    if (g_hWnd && IsWindow(g_hWnd) && s_enabled && !s_inGameMode) {
+    if (s_enabled && !s_inGameMode) {
+        if (!g_hWnd || !IsWindow(g_hWnd)) {
+            EnsureBarWindowCreated();
+        }
+        s_lastPosX = -9999;
+        s_lastPosY = -9999;
         RepaintBar();
     }
 }
