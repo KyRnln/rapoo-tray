@@ -2,22 +2,62 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using RapooTray.Models;
-using RapooTray.Services;
+using BatteryMonitor.Models;
+using BatteryMonitor.Services;
 using Windows.Graphics;
+using WinRT;
 
-namespace RapooTray.Views
+namespace BatteryMonitor.Views
 {
+    internal class WindowsSystemDispatcherQueueHelper
+    {
+        private object? _dispatcherQueueController = null;
+
+        public void EnsureWindowsSystemDispatcherQueueController()
+        {
+            if (Windows.System.DispatcherQueue.GetForCurrentThread() != null)
+                return;
+
+            if (_dispatcherQueueController == null)
+            {
+                DispatcherQueueOptions options;
+                options.dwSize = Marshal.SizeOf(typeof(DispatcherQueueOptions));
+                options.threadType = 2; // DQTYPE_THREAD_CURRENT
+                options.apartmentType = 2; // DQTAT_COM_STA
+
+                CreateDispatcherQueueController(options, ref _dispatcherQueueController);
+            }
+        }
+
+        [DllImport("CoreMessaging.dll")]
+        private static extern int CreateDispatcherQueueController(
+            [In] DispatcherQueueOptions options,
+            [In, Out, MarshalAs(UnmanagedType.IUnknown)] ref object? dispatcherQueueController);
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct DispatcherQueueOptions
+        {
+            internal int dwSize;
+            internal int threadType;
+            internal int apartmentType;
+        }
+    }
+
     public sealed partial class FlyoutWindow : Window
     {
         private AppWindow _appWindow;
         private IntPtr _hWnd;
         private bool _isShowing = false;
+
+        private WindowsSystemDispatcherQueueHelper? _wsdqHelper;
+        private DesktopAcrylicController? _acrylicController;
+        private SystemBackdropConfiguration? _configurationSource;
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
@@ -34,6 +74,12 @@ namespace RapooTray.Views
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetCursorPos(out POINT lpPoint);
+
+        [DllImport("shcore.dll")]
+        private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr hWnd);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct POINT
@@ -63,11 +109,32 @@ namespace RapooTray.Views
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        private const int GWL_STYLE = -16;
+        private const int WS_POPUP = unchecked((int)0x80000000);
+        private const int WS_BORDER = 0x00800000;
+        private const int WS_DLGFRAME = 0x00400000;
+        private const int WS_CAPTION = 0x00C00000;
+        private const int WS_THICKFRAME = 0x00040000;
+        private const int WS_MINIMIZEBOX = 0x00020000;
+        private const int WS_MAXIMIZEBOX = 0x00010000;
+        private const int WS_SYSMENU = 0x00080000;
+
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOZORDER = 0x0004;
+        private const uint SWP_FRAMECHANGED = 0x0020;
+
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
         private const int WS_EX_APPWINDOW = 0x00040000;
         private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
         private const int DWMWCP_ROUND = 2;
+        private const int DWMWA_BORDER_COLOR = 34;
+        private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+        private const int DWMSBT_TRANSIENTWINDOW = 3; // Desktop Acrylic
 
         private static Brush GetBrush(string key, Windows.UI.Color fallback)
         {
@@ -90,9 +157,6 @@ namespace RapooTray.Views
         {
             this.InitializeComponent();
 
-            this.SystemBackdrop = new MicaBackdrop() { Kind = MicaKind.Base };
-            this.ExtendsContentIntoTitleBar = true;
-
             _hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
             _appWindow = AppWindow.GetFromWindowId(windowId);
@@ -106,9 +170,25 @@ namespace RapooTray.Views
                 presenter.IsAlwaysOnTop = true;
             }
 
-            // Windows 11 Rounded corners
-            int cornerPref = DWMWCP_ROUND;
-            DwmSetWindowAttribute(_hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPref, sizeof(int));
+            // Direct DWM Transient Window Acrylic attribute
+            int backdropType = DWMSBT_TRANSIENTWINDOW;
+            DwmSetWindowAttribute(_hWnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType, sizeof(int));
+
+            // Strip caption, apply rounded corners and set dark/gray accent line
+            ApplyBorderlessStyles();
+
+            TrySetCustomAcrylic();
+
+            this.Activated += OnWindowActivated;
+        }
+
+        private void ApplyBorderlessStyles()
+        {
+            // Strip caption, thick resizing frame and non-client border styles
+            int style = GetWindowLong(_hWnd, GWL_STYLE);
+            style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_BORDER | WS_DLGFRAME);
+            style |= WS_POPUP;
+            SetWindowLong(_hWnd, GWL_STYLE, style);
 
             // Tool window style (exclude from Alt+Tab)
             int exStyle = GetWindowLong(_hWnd, GWL_EXSTYLE);
@@ -116,7 +196,46 @@ namespace RapooTray.Views
             exStyle &= ~WS_EX_APPWINDOW;
             SetWindowLong(_hWnd, GWL_EXSTYLE, exStyle);
 
-            this.Activated += OnWindowActivated;
+            SetWindowPos(_hWnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+
+            // Windows 11 Fluent rounded corners
+            int cornerPref = DWMWCP_ROUND;
+            DwmSetWindowAttribute(_hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPref, sizeof(int));
+
+            // Suppress harsh opaque DWM border so XAML translucent FlyoutBorderThemeBrush (reduced 50% opacity) renders smoothly
+            int borderColor = unchecked((int)0xFFFFFFFE);
+            DwmSetWindowAttribute(_hWnd, DWMWA_BORDER_COLOR, ref borderColor, sizeof(int));
+        }
+
+        private bool TrySetCustomAcrylic()
+        {
+            if (!DesktopAcrylicController.IsSupported())
+                return false;
+
+            _wsdqHelper = new WindowsSystemDispatcherQueueHelper();
+            _wsdqHelper.EnsureWindowsSystemDispatcherQueueController();
+
+            _configurationSource = new SystemBackdropConfiguration
+            {
+                IsInputActive = true
+            };
+
+            bool isDark = (Application.Current.RequestedTheme == ApplicationTheme.Dark);
+            _configurationSource.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
+
+            _acrylicController = new DesktopAcrylicController
+            {
+                // Custom tuned acrylic opacities to eliminate the milky white wall
+                TintColor = isDark ? Windows.UI.Color.FromArgb(255, 24, 24, 24) : Windows.UI.Color.FromArgb(255, 245, 245, 250),
+                TintOpacity = isDark ? 0.45f : 0.30f, // 30% in light mode allows high frosted-glass transparency!
+                LuminosityOpacity = 0.60f,
+                FallbackColor = isDark ? Windows.UI.Color.FromArgb(255, 30, 30, 30) : Windows.UI.Color.FromArgb(255, 242, 242, 242)
+            };
+
+            var target = this.As<Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop>();
+            _acrylicController.AddSystemBackdropTarget(target);
+            _acrylicController.SetSystemBackdropConfiguration(_configurationSource);
+            return true;
         }
 
         private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
@@ -124,6 +243,11 @@ namespace RapooTray.Views
             if (args.WindowActivationState == WindowActivationState.Deactivated && _isShowing)
             {
                 HideFlyout();
+            }
+            if (_configurationSource != null)
+            {
+                // Always keep IsInputActive = true to avoid falling back to solid opaque color
+                _configurationSource.IsInputActive = true;
             }
         }
 
@@ -143,36 +267,69 @@ namespace RapooTray.Views
         {
             UpdateDeviceList();
 
-            int cardWidth = 320;
-            int cardHeight = Math.Clamp(60 + (DeviceListPanel.Children.Count * 90) + 48, 120, 520);
-
-            // Compute Coordinates right above the taskbar bar
+            // Determine target monitor and DPI scale factor
             GetCursorPos(out var mousePt);
             IntPtr hMonitor = MonitorFromPoint(mousePt, 2 /* MONITOR_DEFAULTTONEAREST */);
             MONITORINFO mi = new MONITORINFO();
             mi.cbSize = Marshal.SizeOf<MONITORINFO>();
             GetMonitorInfo(hMonitor, ref mi);
 
-            int targetX;
-            if (NativeCore.RapooCore_GetBarRect(out var barRect) && barRect.Bottom > 0)
+            double scale = 1.0;
+            if (GetDpiForMonitor(hMonitor, 0 /* MDT_EFFECTIVE_DPI */, out uint dpiX, out _) == 0 && dpiX > 0)
             {
-                targetX = (barRect.Left + barRect.Right) / 2 - cardWidth / 2;
+                scale = dpiX / 96.0;
             }
             else
             {
-                targetX = mi.rcWork.Right - cardWidth - 12;
+                uint winDpi = GetDpiForWindow(_hWnd);
+                scale = (winDpi > 0 ? winDpi : 96) / 96.0;
             }
 
-            // Spacing from taskbar matching right click menu (8px above workArea.Bottom)
-            int targetY = mi.rcWork.Bottom - cardHeight - 8;
+            int count = DeviceListPanel.Children.Count;
+            // DIP dimensions
+            int logicalWidth = 340;
+            // Header (44) + cards (count * 88) + footer (44) + vertical padding
+            int logicalHeight = Math.Clamp(48 + (Math.Max(1, count) * 88) + 44, 140, 560);
 
-            if (targetX + cardWidth > mi.rcWork.Right - 8) targetX = mi.rcWork.Right - cardWidth - 8;
-            if (targetX < mi.rcWork.Left + 8) targetX = mi.rcWork.Left + 8;
-            if (targetY < mi.rcWork.Top + 8) targetY = mi.rcWork.Top + 8;
+            // Convert DIP to physical pixels for AppWindow.MoveAndResize
+            int physicalWidth = (int)Math.Round(logicalWidth * scale);
+            int physicalHeight = (int)Math.Round(logicalHeight * scale);
 
-            _appWindow.MoveAndResize(new RectInt32(targetX, targetY, cardWidth, cardHeight));
+            int targetX;
+            if (NativeCore.RapooCore_GetBarRect(out var barRect) && barRect.Bottom > 0)
+            {
+                targetX = (barRect.Left + barRect.Right) / 2 - physicalWidth / 2;
+            }
+            else
+            {
+                targetX = mi.rcWork.Right - physicalWidth - (int)Math.Round(12 * scale);
+            }
+
+            // 8 DIP spacing from taskbar
+            int targetY = mi.rcWork.Bottom - physicalHeight - (int)Math.Round(8 * scale);
+
+            // Safe boundary checks
+            int margin = (int)Math.Round(8 * scale);
+            if (targetX + physicalWidth > mi.rcWork.Right - margin) targetX = mi.rcWork.Right - physicalWidth - margin;
+            if (targetX < mi.rcWork.Left + margin) targetX = mi.rcWork.Left + margin;
+            if (targetY < mi.rcWork.Top + margin) targetY = mi.rcWork.Top + margin;
+
+            _appWindow.MoveAndResize(new RectInt32(targetX, targetY, physicalWidth, physicalHeight));
+
+            if (_configurationSource != null)
+            {
+                _configurationSource.IsInputActive = true;
+            }
+
+            // Reset animation state
+            WindowTranslateTransform.Y = 20;
+            RootBorder.Opacity = 0.0;
+
+            ApplyBorderlessStyles();
             this.Activate();
+            ApplyBorderlessStyles();
             _isShowing = true;
+
             SlideUpStoryboard?.Begin();
         }
 
@@ -180,6 +337,8 @@ namespace RapooTray.Views
         {
             if (!_isShowing) return;
             _isShowing = false;
+            SlideUpStoryboard?.Stop();
+            RootBorder.Opacity = 0.0;
             _appWindow.Hide();
         }
 
@@ -200,9 +359,10 @@ namespace RapooTray.Views
             {
                 var emptyCard = new Border
                 {
-                    Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
-                    CornerRadius = new CornerRadius(6),
-                    Padding = new Thickness(16),
+                    Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(200, 255, 255, 255)),
+                    BorderThickness = new Thickness(0),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(18),
                     Child = new TextBlock
                     {
                         Text = "未检测到雷柏外设\n请确认 2.4G 接收器已插入或设备已开机",
@@ -225,11 +385,11 @@ namespace RapooTray.Views
         {
             var cardBorder = new Border
             {
-                Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(20, 128, 128, 128)),
+                Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(220, 255, 255, 255)),
                 BorderBrush = GetBrush("CardStrokeColorDefaultBrush", Windows.UI.Color.FromArgb(30, 128, 128, 128)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(12, 10, 12, 10)
+                Padding = new Thickness(14, 11, 14, 11)
             };
 
             var rootGrid = new Grid();

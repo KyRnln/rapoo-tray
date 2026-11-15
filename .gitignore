@@ -1,6 +1,6 @@
 # Build outputs
-bin/
-obj/
+**/[Bb]in/
+**/[Oo]bj/
 build/
 dist/
 *.exe

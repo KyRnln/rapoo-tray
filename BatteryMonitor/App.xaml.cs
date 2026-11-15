@@ -2,10 +2,10 @@ using System;
 using System.Threading;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
-using RapooTray.Services;
-using RapooTray.Views;
+using BatteryMonitor.Services;
+using BatteryMonitor.Views;
 
-namespace RapooTray
+namespace BatteryMonitor
 {
     public partial class App : Application
     {
@@ -27,7 +27,7 @@ namespace RapooTray
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
-            const string mutexName = @"Local\rapoo-traySingleInstance";
+            const string mutexName = @"Local\BatteryMonitorSingleInstance";
             s_singleInstanceMutex = new Mutex(true, mutexName, out bool createdNew);
             if (!createdNew)
             {

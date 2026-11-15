@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace RapooTray.Models
+namespace BatteryMonitor.Models
 {
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode, Pack = 1)]
     public struct DeviceStateExport

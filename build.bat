@@ -5,6 +5,7 @@ cd /d "%~dp0"
 if not exist bin mkdir bin
 if not exist bin\Release mkdir bin\Release
 
+taskkill /F /IM BatteryMonitor.exe >nul 2>nul
 taskkill /F /IM RapooTray.exe >nul 2>nul
 taskkill /F /IM rapoo-tray.exe >nul 2>nul
 
@@ -25,7 +26,7 @@ if exist "%DOTNET_ROOT%" (
 )
 
 echo ========================================================
-echo   Building Rapoo Tray (WinUI 3 + Native C++ HID Core)
+echo   Building Battery Monitor (WinUI 3 + Native C++ HID Core)
 echo ========================================================
 
 echo [1/2] Compiling Native C++ Hardware Telemetry Core (rapoo_core.dll) ...
@@ -35,8 +36,8 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo [2/2] Publishing Self-Contained WinUI 3 App (bin\Release\RapooTray.exe) ...
-cd RapooTray
+echo [2/2] Publishing Self-Contained WinUI 3 App (bin\Release\BatteryMonitor.exe) ...
+cd BatteryMonitor
 dotnet publish -c Release -r win-x64 --self-contained true -o "..\bin\Release"
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to publish WinUI 3 project.
@@ -48,5 +49,5 @@ cd ..
 echo.
 echo ========================================================
 echo   [SUCCESS] Build completed! (100%% Portable / Self-Contained)
-echo   Output Executable: bin\Release\RapooTray.exe
+echo   Output Executable: bin\Release\BatteryMonitor.exe
 echo ========================================================

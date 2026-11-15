@@ -1,22 +1,61 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Win32;
-using RapooTray.Models;
-using RapooTray.Services;
+using BatteryMonitor.Models;
+using BatteryMonitor.Services;
 using Windows.Graphics;
 
-namespace RapooTray.Views
+namespace BatteryMonitor.Views
 {
     public sealed partial class SettingsWindow : Window
     {
         private AppWindow _appWindow;
         private const string RunRegKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        private const string AppRunName = "RapooTray";
+        private const string AppRunName = "BatteryMonitor";
+
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetCursorPos(out POINT lpPoint);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT
+        {
+            public int X;
+            public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        private struct MONITORINFO
+        {
+            public int cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public uint dwFlags;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
         private static Brush GetBrush(string key, Windows.UI.Color fallback)
         {
@@ -45,8 +84,24 @@ namespace RapooTray.Views
             var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hWnd);
             _appWindow = AppWindow.GetFromWindowId(windowId);
 
-            _appWindow.Resize(new SizeInt32(960, 680));
-            this.Title = "Rapoo Tray 设置";
+            uint dpi = GetDpiForWindow(hWnd);
+            if (dpi == 0) dpi = 96;
+            double scale = dpi / 96.0;
+
+            int winW = (int)Math.Round(960 * scale);
+            int winH = (int)Math.Round(680 * scale);
+
+            GetCursorPos(out var pt);
+            IntPtr hMon = MonitorFromPoint(pt, 2 /* MONITOR_DEFAULTTONEAREST */);
+            MONITORINFO mi = new MONITORINFO();
+            mi.cbSize = Marshal.SizeOf<MONITORINFO>();
+            GetMonitorInfo(hMon, ref mi);
+
+            int posX = mi.rcWork.Left + (mi.rcWork.Right - mi.rcWork.Left - winW) / 2;
+            int posY = mi.rcWork.Top + (mi.rcWork.Bottom - mi.rcWork.Top - winH) / 2;
+
+            _appWindow.MoveAndResize(new RectInt32(posX, posY, winW, winH));
+            this.Title = "Battery Monitor 设置";
 
             NavView.SelectedItem = NavView.MenuItems[0];
             LoadPersonalizationPage();
@@ -98,7 +153,7 @@ namespace RapooTray.Views
             // 2. 停靠位置
             var posCombo = new ComboBox
             {
-                Width = 160,
+                Width = 240,
                 SelectedIndex = Math.Clamp(NativeCore.RapooCore_GetBarPosition(), 0, 2)
             };
             posCombo.Items.Add("靠左侧 (小组件)");
@@ -234,7 +289,7 @@ namespace RapooTray.Views
             // 8. 设备图标颜色
             var iconColorCombo = new ComboBox
             {
-                Width = 160,
+                Width = 240,
                 SelectedIndex = Math.Clamp(NativeCore.RapooCore_GetBarIconColorMode(), 0, 2)
             };
             iconColorCombo.Items.Add("跟随系统主题 (默认)");
@@ -250,7 +305,7 @@ namespace RapooTray.Views
             // 9. 进度条电量颜色
             var barColorCombo = new ComboBox
             {
-                Width = 160,
+                Width = 240,
                 SelectedIndex = Math.Clamp(NativeCore.RapooCore_GetBarColorMode(), 0, 2)
             };
             barColorCombo.Items.Add("跟随系统主题 (默认)");
@@ -384,7 +439,7 @@ namespace RapooTray.Views
             {
                 SetAutoStart(autoStartToggle.IsOn);
             };
-            ContentArea.Children.Add(CreateSettingCard("开机自动启动", "登录 Windows 时自动在后台启动 Rapoo Tray 托盘监控", autoStartToggle));
+            ContentArea.Children.Add(CreateSettingCard("开机自动启动", "登录 Windows 时自动在后台启动 Battery Monitor 托盘监控", autoStartToggle));
 
             // 退出应用
             var exitBtn = new Button
@@ -395,14 +450,14 @@ namespace RapooTray.Views
             {
                 App.ExitApplication();
             };
-            ContentArea.Children.Add(CreateSettingCard("退出 Rapoo Tray", "完全退出外设电量监控托盘程序", exitBtn));
+            ContentArea.Children.Add(CreateSettingCard("退出 Battery Monitor", "完全退出外设电量监控托盘程序", exitBtn));
         }
 
         private void LoadAboutPage()
         {
             ContentArea.Children.Clear();
 
-            AddHeader("关于 Rapoo Tray", "适用于 Windows 11 的现代化雷柏外设电量监控工具");
+            AddHeader("关于 Battery Monitor", "适用于 Windows 11 的现代化外设电量监控工具");
 
             var aboutCard = new Border
             {
@@ -417,7 +472,7 @@ namespace RapooTray.Views
 
             stack.Children.Add(new TextBlock
             {
-                Text = "Rapoo Tray 外设电量监控",
+                Text = "Battery Monitor 外设电量监控",
                 FontSize = 18,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
             });

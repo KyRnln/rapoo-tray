@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="res/logo.png" width="128" height="128" alt="rapoo-tray logo" />
-  <h1>rapoo-tray</h1>
+  <img src="res/logo.png" width="128" height="128" alt="Battery Monitor logo" />
+  <h1>Battery Monitor</h1>
   <p><b>轻量化游戏外设电量 / 状态托盘监控</b></p>
   <p><sub>雷柏（Rapoo）全功能控制 · 多品牌电量聚合 · Windows 11 原生 Fluent 界面</sub></p>
 
@@ -17,7 +17,7 @@
 
 ## 💡 项目简介
 
-**rapoo-tray** 是一款面向游戏外设用户的现代化、轻量级状态与电量监控工具。采用 **WinUI 3 (Windows App SDK) + 原生 C++ HID 遥测核心** 双架构：
+**Battery Monitor** 是一款面向游戏外设用户的现代化、轻量级状态与电量监控工具。采用 **WinUI 3 (Windows App SDK) + 原生 C++ HID 遥测核心** 双架构：
 
 - **100% 官方 Windows 11 云母 (Mica) 与亚克力 (Desktop Acrylic) 材质**：彻底告别白底、白框与白屏闪烁，与 Windows 11 原生控制中心、音量浮窗体验完全一致。
 - **任务栏常驻电量指示**：直接嵌入 Windows 11 任务栏，实时显示当前置顶外设的名称、电量百分比、进度条与设备分类图标。
@@ -197,7 +197,7 @@
 ```cmd
 build.bat
 ```
-- **输出可执行文件**：`bin\Release\RapooTray.exe`
+- **输出可执行文件**：`bin\Release\BatteryMonitor.exe`
 - **特性**：全自包含（Self-Contained），内置所有运行时与 Windows App SDK 组件，**完全免安装**，双击即可直接运行使用。
 
 ### 2. 编译 TrafficMonitor 插件 (可选)

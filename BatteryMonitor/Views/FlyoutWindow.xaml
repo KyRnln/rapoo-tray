@@ -1,8 +1,8 @@
 <Window
-    x:Class="RapooTray.Views.FlyoutWindow"
+    x:Class="BatteryMonitor.Views.FlyoutWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:RapooTray.Views"
+    xmlns:local="using:BatteryMonitor.Views"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
@@ -13,8 +13,8 @@
             <Storyboard x:Name="SlideUpStoryboard">
                 <DoubleAnimation Storyboard.TargetName="WindowTranslateTransform"
                                  Storyboard.TargetProperty="Y"
-                                 From="26" To="0"
-                                 Duration="0:0:0.22">
+                                 From="18" To="0"
+                                 Duration="0:0:0.20">
                     <DoubleAnimation.EasingFunction>
                         <CircleEase EasingMode="EaseOut" />
                     </DoubleAnimation.EasingFunction>
@@ -30,11 +30,11 @@
             </Storyboard>
         </Grid.Resources>
 
-        <!-- Main Card Container: Transparent to let the pure Mica backdrop shine through -->
+        <!-- Main Card Container: Windows 11 Rounded with subtle dark/gray accent border -->
         <Border x:Name="RootBorder"
                 Margin="1"
                 Background="Transparent"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderBrush="{ThemeResource FlyoutBorderThemeBrush}"
                 BorderThickness="1"
                 CornerRadius="8">
             <Border.RenderTransform>
@@ -42,17 +42,14 @@
             </Border.RenderTransform>
 
             <Grid RowDefinitions="Auto,*,Auto">
-                <!-- Header (Transparent on top of Mica) -->
-                <Grid Grid.Row="0" Padding="14,12,14,8">
+                <!-- Header: Transparent, text only (no icon, no top border artifact) -->
+                <Grid Grid.Row="0" Padding="14,12,14,6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE962;" FontSize="15" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                        <TextBlock Text="已连接外设" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    </StackPanel>
+                    <TextBlock Grid.Column="0" Text="已连接外设" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,0,0" />
 
                     <Button Grid.Column="1" Click="OnRefreshClicked"
                             Background="Transparent" BorderThickness="0"
@@ -61,30 +58,26 @@
                     </Button>
                 </Grid>
 
-                <Border Grid.Row="0" VerticalAlignment="Bottom" Height="1"
-                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" Opacity="0.4" />
-
-                <!-- Devices List (Floating cards with solid fill on top of Mica) -->
+                <!-- Devices List (Floating solid cards on translucent acrylic canvas) -->
                 <ScrollViewer Grid.Row="1" MaxHeight="400" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel x:Name="DeviceListPanel" Padding="10,8" Spacing="8">
-                        <!-- Populated dynamically with individual cards -->
+                    <StackPanel x:Name="DeviceListPanel" Padding="10,6" Spacing="8">
+                        <!-- Populated dynamically with individual solid cards -->
                     </StackPanel>
                 </ScrollViewer>
 
-                <!-- Footer Action Bar (Transparent on top of Mica with subtle top border) -->
+                <!-- Footer Action Bar: Subtle transparent footer -->
                 <Grid Grid.Row="2"
                       Background="Transparent"
-                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                      BorderThickness="0,1,0,0"
-                      Padding="10,8">
+                      BorderThickness="0"
+                      Padding="12,6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock Grid.Column="0" Text="Rapoo Tray" FontSize="11"
+                    <TextBlock Grid.Column="0" Text="Battery Monitor" FontSize="11"
                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                               VerticalAlignment="Center" Margin="4,0,0,0" />
+                               VerticalAlignment="Center" Margin="2,0,0,0" />
 
                     <Button Grid.Column="1" Click="OnOpenSettingsClicked"
                             Background="Transparent" BorderThickness="0"

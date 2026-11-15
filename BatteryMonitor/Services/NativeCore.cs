@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using RapooTray.Models;
+using BatteryMonitor.Models;
 
-namespace RapooTray.Services
+namespace BatteryMonitor.Services
 {
     public static class NativeCore
     {
