@@ -8,6 +8,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using BatteryMonitor.Models;
 using BatteryMonitor.Services;
 using Windows.Graphics;
@@ -68,6 +69,11 @@ namespace BatteryMonitor.Views
         private double _dpiScale = 1.0;
         private int _targetX = 0;
         private int _targetY = 0;
+        private double _animStartOpacity = 1.0;
+
+        // WinUI 3 官方 EasingFunction 缓动标准对象 (Windows 11 Fluent 规范)
+        private static readonly CubicEase s_enterEase = new() { EasingMode = EasingMode.EaseOut };
+        private static readonly CubicEase s_exitEase = new() { EasingMode = EasingMode.EaseInOut };
 
         private WindowsSystemDispatcherQueueHelper? _wsdqHelper;
         private DesktopAcrylicController? _acrylicController;
@@ -380,34 +386,51 @@ namespace BatteryMonitor.Views
                 {
                     _isShowing = true;
                     _isClosing = false;
+                    RootBorder.Opacity = 1.0;
                 }
                 else
                 {
                     _isShowing = false;
                     _isClosing = false;
+                    RootBorder.Opacity = 0.0;
                     _appWindow.Hide();
                 }
                 return;
             }
 
-            // Calculate eased progress
-            double eased;
-            if (_animIsEntering)
-            {
-                // EaseOutCubic: 1 - (1 - t)^3 (smooth deceleration into resting position)
-                double inv = 1.0 - t;
-                eased = 1.0 - (inv * inv * inv);
-            }
-            else
-            {
-                // EaseInCubic: t^3 (smooth acceleration downward into taskbar)
-                eased = t * t * t;
-            }
+            // 使用 WinUI 3 官方 EasingFunctionBase.Ease(t) 计算物理窗口位移插值
+            // 入场：EaseOut 平滑减速停靠
+            // 退场：EaseInOut (Fast-Out-Slow-In)，后段平滑减速入任务栏，末端速度自然归零
+            double eased = _animIsEntering ? s_enterEase.Ease(t) : s_exitEase.Ease(t);
 
             int curX = (int)Math.Round(_animStartX + (_animTargetX - _animStartX) * eased);
             int curY = (int)Math.Round(_animStartY + (_animTargetY - _animStartY) * eased);
 
             SetWindowPos(_hWnd, IntPtr.Zero, curX, curY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+            // 整体渐变过渡 (Opacity Transition)：
+            // 入场：随滑动快速平滑淡入到 1.0
+            // 退场：前半段全程保持 100% 实体可见，清晰完整地展现卡片完整向下沉入任务栏的滑落轨迹；
+            //      后半段接近任务栏底部时柔和溶入淡出，落地瞬间透明度刚好平滑归零 (0.0)，彻底消除提前消失与生硬截断！
+            if (_animIsEntering)
+            {
+                double opProgress = Math.Clamp(t / 0.70, 0.0, 1.0);
+                RootBorder.Opacity = _animStartOpacity + (1.0 - _animStartOpacity) * s_enterEase.Ease(opProgress);
+            }
+            else
+            {
+                double op;
+                if (t < 0.45)
+                {
+                    op = 1.0; // 前 45% 全程 100% 不透明，完整展示物理向下滑动
+                }
+                else
+                {
+                    double u = (t - 0.45) / 0.55;
+                    op = Math.Clamp(1.0 - u, 0.0, 1.0);
+                }
+                RootBorder.Opacity = _animStartOpacity * op;
+            }
         }
 
         public void ShowAtTaskbar()
@@ -468,8 +491,8 @@ namespace BatteryMonitor.Views
             _targetY = targetY;
             _dpiScale = scale;
 
-            // 向上滑入距离 (约 36 DIP)
-            int slideDistance = (int)Math.Round(36 * scale);
+            // 向上滑入距离 (约 80 DIP，从任务栏深处平滑滑出就位)
+            int slideDistance = (int)Math.Round(Math.Min(physicalHeight * 0.45, 80 * scale));
             int startY = targetY + slideDistance;
 
             // 初始在目标下方 startY 处设置尺寸并显示，确保整个卡片（亚克力+边框+内容）作为一个整体向上滑出
@@ -480,13 +503,16 @@ namespace BatteryMonitor.Views
                 _configurationSource.IsInputActive = true;
             }
 
+            _animStartOpacity = 0.0;
+            RootBorder.Opacity = 0.0;
+
             ApplyBorderlessStyles();
             this.Activate();
             ApplyBorderlessStyles();
             _isShowing = true;
 
-            // 启动原生级物理窗口向上平滑滑动动画 (250ms, CubicEaseOut)
-            StartSlideAnimation(isEntering: true, targetX, startY, targetX, targetY, 250.0);
+            // 启动 Windows 11 Fluent 规范物理窗口向上平滑滑动动画 (260ms, EaseOut 平滑就位)
+            StartSlideAnimation(isEntering: true, targetX, startY, targetX, targetY, 260.0);
 
             InstallMouseHook();
         }
@@ -500,20 +526,28 @@ namespace BatteryMonitor.Views
             _isShowing = false;
             UninstallMouseHook();
 
-            // 获取当前实际窗口位置，如果正在滑入过程中被中断也能无缝反向滑落
+            // 记录当前实际透明度作为退场渐变起点
+            _animStartOpacity = Math.Clamp(RootBorder.Opacity, 0.0, 1.0);
+            if (_animStartOpacity < 0.05) _animStartOpacity = 1.0;
+
+            // 获取当前实际窗口位置与高度
             int curX = _targetX;
             int curY = _targetY;
+            int curHeight = 300;
             if (GetWindowRect(_hWnd, out var curRect))
             {
                 curX = curRect.Left;
                 curY = curRect.Top;
+                curHeight = curRect.Bottom - curRect.Top;
             }
 
-            int slideDistance = (int)Math.Round(36 * _dpiScale);
-            int targetEndY = _targetY + slideDistance;
+            // 完整退场距离：整块卡片的全部物理高度 + 任务栏边距
+            // 确保卡片顶部完全滑入/落入任务栏以下，实现 100% 完整的下滑退场动画，绝不在半途提前消失
+            int fullExitDistance = curHeight + (int)Math.Round(16 * _dpiScale);
+            int targetEndY = _targetY + fullExitDistance;
 
-            // 启动原生级物理窗口向下平滑滑动退场动画 (200ms, CubicEaseIn)
-            StartSlideAnimation(isEntering: false, curX, curY, curX, targetEndY, 200.0);
+            // 启动 Windows 11 Fluent 规范物理窗口完整向下滑动退场动画 (300ms, EaseInOut 平滑减速缓冲)
+            StartSlideAnimation(isEntering: false, curX, curY, curX, targetEndY, 300.0);
         }
 
         private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -588,6 +622,21 @@ namespace BatteryMonitor.Views
             }
         }
 
+        private static void AnimateBrushColor(SolidColorBrush brush, Windows.UI.Color targetColor, double durationMs)
+        {
+            var anim = new ColorAnimation
+            {
+                To = targetColor,
+                Duration = TimeSpan.FromMilliseconds(durationMs),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            var sb = new Storyboard();
+            sb.Children.Add(anim);
+            Storyboard.SetTarget(anim, brush);
+            Storyboard.SetTargetProperty(anim, "Color");
+            sb.Begin();
+        }
+
         public void RefreshState()
         {
             if (_isShowing)
@@ -601,12 +650,16 @@ namespace BatteryMonitor.Views
             DeviceListPanel.Children.Clear();
             var devices = NativeCore.GetAllDevices();
 
+            bool isDark = (Application.Current.RequestedTheme == ApplicationTheme.Dark);
+            var fontText = new FontFamily("Segoe UI Variable Text, Segoe UI");
+
             if (devices.Count == 0)
             {
                 var emptyCard = new Border
                 {
-                    Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(200, 255, 255, 255)),
-                    BorderThickness = new Thickness(0),
+                    Background = new SolidColorBrush(isDark ? Windows.UI.Color.FromArgb(170, 36, 36, 36) : Windows.UI.Color.FromArgb(215, 255, 255, 255)),
+                    BorderBrush = new SolidColorBrush(isDark ? Windows.UI.Color.FromArgb(20, 255, 255, 255) : Windows.UI.Color.FromArgb(20, 0, 0, 0)),
+                    BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(18),
                     Child = new TextBlock
@@ -614,7 +667,8 @@ namespace BatteryMonitor.Views
                         Text = "未检测到雷柏外设\n请确认 2.4G 接收器已插入或设备已开机",
                         TextAlignment = TextAlignment.Center,
                         Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128)),
-                        FontSize = 12
+                        FontSize = 12,
+                        FontFamily = fontText
                     }
                 };
                 DeviceListPanel.Children.Add(emptyCard);
@@ -629,13 +683,41 @@ namespace BatteryMonitor.Views
 
         private UIElement CreateDeviceCard(DeviceModel dev)
         {
+            bool isDark = (Application.Current.RequestedTheme == ApplicationTheme.Dark);
+
+            var fontDisplay = new FontFamily("Segoe UI Variable Display, Segoe UI Variable Text, Segoe UI");
+            var fontText = new FontFamily("Segoe UI Variable Text, Segoe UI");
+
+            // Windows 11 Fluent 规范：0.08 透明度微描边 (Accent/Card Stroke) 与半透明实色卡片层
+            var normalBgColor = isDark ? Windows.UI.Color.FromArgb(170, 36, 36, 36) : Windows.UI.Color.FromArgb(215, 255, 255, 255);
+            var hoverBgColor = isDark ? Windows.UI.Color.FromArgb(225, 48, 48, 48) : Windows.UI.Color.FromArgb(245, 255, 255, 255);
+
+            var normalBorderColor = isDark ? Windows.UI.Color.FromArgb(20, 255, 255, 255) : Windows.UI.Color.FromArgb(20, 0, 0, 0); // 0.08 微描边
+            var hoverBorderColor = isDark ? Windows.UI.Color.FromArgb(45, 255, 255, 255) : Windows.UI.Color.FromArgb(40, 0, 0, 0);
+
+            var bgBrush = new SolidColorBrush(normalBgColor);
+            var borderBrush = new SolidColorBrush(normalBorderColor);
+
             var cardBorder = new Border
             {
-                Background = GetBrush("CardBackgroundFillColorDefaultBrush", Windows.UI.Color.FromArgb(220, 255, 255, 255)),
-                BorderBrush = GetBrush("CardStrokeColorDefaultBrush", Windows.UI.Color.FromArgb(30, 128, 128, 128)),
+                Background = bgBrush,
+                BorderBrush = borderBrush,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(6),
+                CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(14, 11, 14, 11)
+            };
+
+            // 设备卡片悬停反馈 (Hover State)：指针进入增加高亮微光，移开平滑淡出过渡
+            cardBorder.PointerEntered += (s, e) =>
+            {
+                AnimateBrushColor(bgBrush, hoverBgColor, 140);
+                AnimateBrushColor(borderBrush, hoverBorderColor, 140);
+            };
+
+            cardBorder.PointerExited += (s, e) =>
+            {
+                AnimateBrushColor(bgBrush, normalBgColor, 180);
+                AnimateBrushColor(borderBrush, normalBorderColor, 180);
             };
 
             var rootGrid = new Grid();
@@ -665,6 +747,7 @@ namespace BatteryMonitor.Views
                 Text = dev.ModelName,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 FontSize = 13,
+                FontFamily = fontDisplay,
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
             namePanel.Children.Add(nameText);
@@ -673,6 +756,7 @@ namespace BatteryMonitor.Views
             {
                 Text = dev.IsConnected ? dev.ConnType : "未连接",
                 FontSize = 11,
+                FontFamily = fontText,
                 Foreground = GetBrush("TextFillColorTertiaryBrush", Windows.UI.Color.FromArgb(120, 128, 128, 128))
             };
             namePanel.Children.Add(subText);
@@ -702,6 +786,7 @@ namespace BatteryMonitor.Views
                 Text = dev.HasBattery ? $"{dev.Battery}%" : "--",
                 FontSize = 13,
                 FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                FontFamily = fontDisplay,
                 VerticalAlignment = VerticalAlignment.Center
             });
 
@@ -774,6 +859,7 @@ namespace BatteryMonitor.Views
                 {
                     Text = text,
                     FontSize = 10,
+                    FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"),
                     Foreground = GetBrush("TextFillColorSecondaryBrush", Windows.UI.Color.FromArgb(180, 128, 128, 128))
                 }
             };
