@@ -70,6 +70,7 @@ namespace BatteryMonitor.Views
         private int _targetX = 0;
         private int _targetY = 0;
         private double _animStartOpacity = 1.0;
+        private IntPtr _hTaskbar = IntPtr.Zero;
 
         // WinUI 3 官方 EasingFunction 缓动标准对象 (Windows 11 Fluent 规范)
         private static readonly CubicEase s_enterEase = new() { EasingMode = EasingMode.EaseOut };
@@ -131,6 +132,19 @@ namespace BatteryMonitor.Views
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string? lpszClass, string? lpszWindow);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint dwFlags);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindow(IntPtr hWnd);
 
         private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -367,6 +381,40 @@ namespace BatteryMonitor.Views
             }
         }
 
+        private IntPtr GetTaskbarWindow(IntPtr hMonitor = default)
+        {
+            try
+            {
+                IntPtr hTargetMonitor = hMonitor != IntPtr.Zero ? hMonitor : MonitorFromWindow(_hWnd, 2 /* MONITOR_DEFAULTTONEAREST */);
+
+                // 优先检查主任务栏
+                IntPtr hPrimary = FindWindow("Shell_TrayWnd", null);
+                if (hPrimary != IntPtr.Zero && (hTargetMonitor == IntPtr.Zero || MonitorFromWindow(hPrimary, 2) == hTargetMonitor))
+                {
+                    return hPrimary;
+                }
+
+                // 多显示器副任务栏检测
+                IntPtr hSec = IntPtr.Zero;
+                while ((hSec = FindWindowEx(IntPtr.Zero, hSec, "Shell_SecondaryTrayWnd", null)) != IntPtr.Zero)
+                {
+                    if (hTargetMonitor == IntPtr.Zero || MonitorFromWindow(hSec, 2) == hTargetMonitor)
+                    {
+                        return hSec;
+                    }
+                }
+
+                // 回退到主任务栏
+                if (hPrimary != IntPtr.Zero)
+                {
+                    return hPrimary;
+                }
+            }
+            catch { }
+
+            return IntPtr.Zero;
+        }
+
         private void OnCompositionRendering(object? sender, object e)
         {
             if (!_isAnimRunning) return;
@@ -379,8 +427,15 @@ namespace BatteryMonitor.Views
                 t = 1.0;
                 StopSlideAnimation();
 
-                // Snap to final exact target position
-                SetWindowPos(_hWnd, IntPtr.Zero, _animTargetX, _animTargetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                // Snap to final exact target position behind taskbar
+                if (_hTaskbar != IntPtr.Zero && IsWindow(_hTaskbar))
+                {
+                    SetWindowPos(_hWnd, _hTaskbar, _animTargetX, _animTargetY, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+                }
+                else
+                {
+                    SetWindowPos(_hWnd, IntPtr.Zero, _animTargetX, _animTargetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                }
 
                 if (_animIsEntering)
                 {
@@ -406,7 +461,15 @@ namespace BatteryMonitor.Views
             int curX = (int)Math.Round(_animStartX + (_animTargetX - _animStartX) * eased);
             int curY = (int)Math.Round(_animStartY + (_animTargetY - _animStartY) * eased);
 
-            SetWindowPos(_hWnd, IntPtr.Zero, curX, curY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            // 始终指定 hWndInsertAfter 为任务栏句柄，确保无论进场还是退场物理窗口始终被任务栏遮盖（位于任务栏后方滑动）
+            if (_hTaskbar != IntPtr.Zero && IsWindow(_hTaskbar))
+            {
+                SetWindowPos(_hWnd, _hTaskbar, curX, curY, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            else
+            {
+                SetWindowPos(_hWnd, IntPtr.Zero, curX, curY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
 
             // 整体渐变过渡 (Opacity Transition)：
             // 入场：随滑动快速平滑淡入到 1.0
@@ -511,6 +574,13 @@ namespace BatteryMonitor.Views
             ApplyBorderlessStyles();
             _isShowing = true;
 
+            // 查找任务栏句柄并立即将卡片物理窗口放入任务栏后方，确保从任务栏后方滑出
+            _hTaskbar = GetTaskbarWindow(hMonitor);
+            if (_hTaskbar != IntPtr.Zero && IsWindow(_hTaskbar))
+            {
+                SetWindowPos(_hWnd, _hTaskbar, targetX, startY, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+
             // 启动 Windows 11 Fluent 规范物理窗口向上平滑滑动动画 (260ms, EaseOut 平滑就位)
             StartSlideAnimation(isEntering: true, targetX, startY, targetX, targetY, 260.0);
 
@@ -525,6 +595,13 @@ namespace BatteryMonitor.Views
             _isClosing = true;
             _isShowing = false;
             UninstallMouseHook();
+
+            // 确保任务栏句柄有效，并在退场滑动前立即强制将窗口 Z 序压到任务栏后方，确保始终从任务栏后方下滑
+            _hTaskbar = GetTaskbarWindow();
+            if (_hTaskbar != IntPtr.Zero && IsWindow(_hTaskbar))
+            {
+                SetWindowPos(_hWnd, _hTaskbar, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
 
             // 记录当前实际透明度作为退场渐变起点
             _animStartOpacity = Math.Clamp(RootBorder.Opacity, 0.0, 1.0);
